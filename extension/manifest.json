@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "MonkeyCode Cookie Bridge",
+  "version": "1.0.0",
+  "description": "Securely synchronizes the active MonkeyCode session with a paired scheduler account.",
+  "permissions": [
+    "alarms",
+    "cookies",
+    "notifications",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://monkeycode-ai.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "MonkeyCode Cookie Bridge",
+    "default_icon": "icons/icon.png"
+  },
+  "icons": {
+    "128": "icons/icon.png"
+  },
+  "options_page": "options.html"
+}

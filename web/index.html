@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>MonkeyCode 调度台</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <section id="login-view" class="login-view" hidden>
+    <div class="login-brand">
+      <span class="brand-mark"><i data-lucide="bot"></i></span>
+      <div><strong>MonkeyCode 调度台</strong><span>任务自动化控制</span></div>
+    </div>
+    <form id="login-form" class="login-form">
+      <div class="login-copy">
+        <h1>登录控制台</h1>
+        <p>管理定时发送、凭证和执行记录。</p>
+      </div>
+      <label class="field">
+        <span>管理密码</span>
+        <span class="password-wrap">
+          <input id="login-password" name="password" type="password" autocomplete="current-password" required autofocus>
+          <button class="icon-button password-toggle" type="button" data-toggle-password="login-password" title="显示密码" aria-label="显示密码"><i data-lucide="eye"></i></button>
+        </span>
+      </label>
+      <p id="login-error" class="form-error" role="alert"></p>
+      <button class="button primary wide" type="submit"><i data-lucide="log-in"></i><span>登录</span></button>
+    </form>
+  </section>
+
+  <div id="app" class="app" hidden>
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark"><i data-lucide="bot"></i></span>
+        <div class="brand-copy"><strong>MonkeyCode</strong><span>自动化调度台</span></div>
+      </div>
+      <nav class="nav" aria-label="主导航">
+        <button class="nav-item active" type="button" data-page="overview"><i data-lucide="layout-dashboard"></i><span>概览</span></button>
+        <button class="nav-item" type="button" data-page="tasks"><i data-lucide="calendar-clock"></i><span>任务</span><span id="nav-task-count" class="nav-count">0</span></button>
+        <button class="nav-item" type="button" data-page="remote"><i data-lucide="cloud-cog"></i><span>远端任务</span><span id="nav-remote-count" class="nav-count">0</span></button>
+        <button class="nav-item" type="button" data-page="accounts"><i data-lucide="users-round"></i><span>账号</span><span id="nav-account-count" class="nav-count">0</span></button>
+        <button class="nav-item" type="button" data-page="history"><i data-lucide="history"></i><span>记录</span></button>
+        <button class="nav-item" type="button" data-page="settings"><i data-lucide="settings-2"></i><span>设置</span></button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="service-state"><span id="service-dot" class="status-dot ok"></span><span id="service-label">调度服务运行中</span></div>
+        <button id="logout-button" class="icon-button" type="button" title="退出登录" aria-label="退出登录"><i data-lucide="log-out"></i></button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p id="page-eyebrow" class="eyebrow">MONKEYCODE SCHEDULER</p>
+          <h1 id="page-title">运行概览</h1>
+        </div>
+        <div class="topbar-actions">
+          <span id="last-refresh" class="last-refresh"></span>
+          <button id="refresh-button" class="icon-button" type="button" title="刷新" aria-label="刷新"><i data-lucide="refresh-cw"></i></button>
+          <button id="primary-action" class="button primary" type="button"><i data-lucide="plus"></i><span>新建任务</span></button>
+        </div>
+      </header>
+
+      <section id="page-overview" class="page active" aria-labelledby="page-title">
+        <div id="stats-grid" class="stats-grid"></div>
+        <div id="overview-alerts" class="alert-list overview-alerts"></div>
+        <div class="section-heading">
+          <div><h2>任务状态</h2><p>计划、凭证与最近运行结果</p></div>
+        </div>
+        <div id="overview-tasks" class="task-table-wrap"></div>
+        <div class="section-heading">
+          <div><h2>最近活动</h2><p>调度执行与通知结果</p></div>
+          <button class="text-button" type="button" data-page-link="history">查看全部</button>
+        </div>
+        <div id="overview-logs" class="activity-list"></div>
+      </section>
+
+      <section id="page-tasks" class="page" aria-labelledby="page-title">
+        <div class="task-workspace">
+          <aside class="task-list-pane">
+            <div class="pane-heading"><h2>全部任务</h2><button id="add-task-icon" class="icon-button" type="button" title="新建任务" aria-label="新建任务"><i data-lucide="plus"></i></button></div>
+            <div id="task-list" class="task-list"></div>
+          </aside>
+          <div id="task-editor" class="task-editor"></div>
+        </div>
+      </section>
+
+      <section id="page-remote" class="page" aria-labelledby="page-title">
+        <div class="remote-toolbar">
+          <label class="compact-field"><span>账号</span><select id="remote-account-filter"><option value="">全部账号</option></select></label>
+          <label class="compact-field"><span>状态</span><select id="remote-status-filter"><option value="">全部状态</option><option value="processing">运行中</option><option value="pending">等待中</option><option value="finished">已完成</option><option value="error">异常</option></select></label>
+          <label class="compact-field remote-search"><span>搜索</span><span class="search-input"><i data-lucide="search"></i><input id="remote-search" type="search" placeholder="名称或任务 ID"></span></label>
+          <button id="sync-all-remote" class="button secondary" type="button"><i data-lucide="refresh-cw"></i><span>同步全部</span></button>
+        </div>
+        <div id="remote-summary" class="remote-summary"></div>
+        <div class="remote-workspace">
+          <div id="remote-task-list" class="remote-task-list"></div>
+          <aside id="remote-task-detail" class="remote-task-detail"></aside>
+        </div>
+      </section>
+
+      <section id="page-accounts" class="page" aria-labelledby="page-title">
+        <div class="section-heading account-heading">
+          <div><h2>MonkeyCode 账号</h2><p>一个账号可供多个定时任务共用</p></div>
+        </div>
+        <div id="account-list" class="account-table-wrap"></div>
+      </section>
+
+      <section id="page-history" class="page" aria-labelledby="page-title">
+        <div class="filterbar">
+          <label class="compact-field"><span>任务</span><select id="log-task-filter"><option value="">全部任务</option></select></label>
+          <label class="compact-field"><span>结果</span><select id="log-status-filter"><option value="">全部结果</option><option value="accepted">已接收</option><option value="completed">远端完成</option><option value="completion-timeout">完成确认超时</option><option value="sent">发送成功</option><option value="synced">同步成功</option><option value="duplicate">重复跳过</option><option value="dry-run">模拟运行</option><option value="auto-paused">自动暂停</option><option value="session-warning">凭证即将到期</option><option value="auth-expired">登录失效</option><option value="failed">失败</option></select></label>
+          <div class="filter-actions">
+            <button id="export-logs" class="button secondary" type="button"><i data-lucide="download"></i><span>导出 CSV</span></button>
+            <button id="clear-logs" class="button secondary" type="button"><i data-lucide="trash-2"></i><span>清理记录</span></button>
+          </div>
+        </div>
+        <div id="history-table" class="history-table-wrap"></div>
+      </section>
+
+      <section id="page-settings" class="page" aria-labelledby="page-title">
+        <div class="settings-layout">
+          <section class="settings-section">
+            <div class="section-heading compact">
+              <div><h2>全局调度</h2><p>暂停后保留配置，但不再自动执行</p></div>
+              <label class="switch"><input id="global-enabled" type="checkbox"><span></span><em>启用</em></label>
+            </div>
+          </section>
+          <section class="settings-section">
+            <form id="operations-settings-form">
+              <div class="section-heading compact"><div><h2>运行记录</h2><p>自动清理过期记录并限制日志文件增长</p></div></div>
+              <div class="form-grid settings-fields">
+                <label class="field"><span>保留天数</span><input id="log-retention-days" name="logRetentionDays" type="number" min="7" max="365" required></label>
+              </div>
+              <div class="settings-actions"><button class="button secondary" type="submit"><i data-lucide="save"></i><span>保存记录设置</span></button></div>
+            </form>
+          </section>
+          <section class="settings-section">
+            <form id="remote-settings-form">
+              <div class="section-heading compact">
+                <div><h2>远端状态同步</h2><p>定期刷新账号额度、任务状态和开发环境</p></div>
+                <label class="switch"><input id="remote-sync-enabled" name="enabled" type="checkbox"><span></span><em>启用</em></label>
+              </div>
+              <div class="form-grid settings-fields">
+                <label class="field"><span>同步间隔（分钟）</span><input id="remote-sync-interval" name="intervalMinutes" type="number" min="1" max="1440" required></label>
+                <label class="field"><span>额度提醒阈值</span><select id="quota-warning-percent" name="quotaWarningPercent"><option value="5">剩余 5%</option><option value="10">剩余 10%</option><option value="20">剩余 20%</option><option value="30">剩余 30%</option><option value="50">剩余 50%</option></select></label>
+              </div>
+              <div class="settings-actions"><button class="button secondary" type="submit"><i data-lucide="save"></i><span>保存同步设置</span></button></div>
+            </form>
+          </section>
+          <section class="settings-section">
+            <div class="section-heading compact">
+              <div><h2>通知渠道</h2><p>成功、失败和凭证失效时发送提醒</p></div>
+              <button id="add-notification" class="button secondary" type="button"><i data-lucide="plus"></i><span>添加渠道</span></button>
+            </div>
+            <div id="notification-list" class="notification-list"></div>
+          </section>
+          <section class="settings-section">
+            <div class="section-heading compact"><div><h2>配置备份</h2><p>导出文件包含加密凭证，恢复时必须使用相同主密钥</p></div></div>
+            <div class="button-row">
+              <button id="export-backup" class="button secondary" type="button"><i data-lucide="archive"></i><span>导出备份</span></button>
+              <label class="button secondary file-button"><i data-lucide="upload"></i><span>导入备份</span><input id="import-backup" type="file" accept="application/json,.json"></label>
+            </div>
+          </section>
+          <section class="settings-section">
+            <div class="section-heading compact"><div><h2>运行环境</h2><p>当前面板进程状态</p></div></div>
+            <dl id="system-info" class="system-info"></dl>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="account-dialog" class="dialog">
+    <form id="account-form" method="dialog">
+      <div class="dialog-header"><div><p class="eyebrow">ACCOUNT</p><h2 id="account-dialog-title">添加 MonkeyCode 账号</h2></div><button class="icon-button" type="button" data-close-dialog="account-dialog" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div class="dialog-body">
+        <div class="form-grid">
+          <label class="field"><span>账号名称</span><input name="name" maxlength="80" required></label>
+          <label class="field"><span>服务地址</span><input name="baseUrl" type="url" value="https://monkeycode-ai.com" required></label>
+        </div>
+        <label class="field"><span>monkeycode_ai_session</span><span class="password-wrap"><input id="account-session-input" name="session" type="password" autocomplete="off"><button class="icon-button password-toggle" type="button" data-toggle-password="account-session-input" title="显示 Cookie" aria-label="显示 Cookie"><i data-lucide="eye"></i></button></span><small id="account-session-hint" class="field-hint">填写 Cookie 的 Value，保存时会加密。</small></label>
+        <label id="clear-account-session-row" class="check-row" hidden><input name="clearSession" type="checkbox"><span>清除当前 Cookie</span></label>
+      </div>
+      <div class="dialog-footer"><button class="button secondary" type="button" data-close-dialog="account-dialog">取消</button><button class="button primary" type="submit"><i data-lucide="save"></i><span>保存账号</span></button></div>
+    </form>
+  </dialog>
+
+  <dialog id="browser-bridge-dialog" class="dialog browser-bridge-dialog">
+    <div class="dialog-header"><div><p class="eyebrow">BROWSER SYNC</p><h2 id="browser-bridge-account">浏览器同步</h2></div><button class="icon-button" type="button" data-close-dialog="browser-bridge-dialog" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></div>
+    <div class="dialog-body">
+      <section class="bridge-section">
+        <div class="bridge-section-heading"><div><h3>一次性配对码</h3><p>5 分钟内有效</p></div><button class="icon-button" type="button" data-bridge-generate title="重新生成" aria-label="重新生成配对码"><i data-lucide="refresh-cw"></i></button></div>
+        <div id="browser-pair-code" class="pair-code"></div>
+      </section>
+      <section class="bridge-section">
+        <div class="bridge-section-heading"><div><h3>已连接设备</h3><p>每个 Chrome 配置独立连接一个账号</p></div></div>
+        <div id="browser-device-list" class="browser-device-list"></div>
+      </section>
+    </div>
+  </dialog>
+
+  <dialog id="notification-dialog" class="dialog">
+    <form id="notification-form" method="dialog">
+      <div class="dialog-header"><div><p class="eyebrow">NOTIFICATION</p><h2 id="notification-dialog-title">添加通知渠道</h2></div><button class="icon-button" type="button" data-close-dialog="notification-dialog" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div id="notification-fields" class="dialog-body"></div>
+      <div class="dialog-footer"><button class="button secondary" type="button" data-close-dialog="notification-dialog">取消</button><button class="button primary" type="submit"><i data-lucide="save"></i><span>保存</span></button></div>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="dialog confirm-dialog">
+    <form method="dialog">
+      <div class="confirm-icon"><i data-lucide="triangle-alert"></i></div>
+      <h2 id="confirm-title">确认操作</h2>
+      <p id="confirm-message"></p>
+      <div class="dialog-footer"><button class="button secondary" value="cancel">取消</button><button id="confirm-submit" class="button danger" value="confirm">确认</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  <script src="/vendor/lucide.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

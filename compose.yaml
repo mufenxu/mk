@@ -1,0 +1,43 @@
+services:
+  monkeycode-panel:
+    image: ghcr.io/mufenxu/mk:${MONKEYCODE_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - /etc/monkeycode-panel.env
+    environment:
+      MONKEYCODE_PANEL_HOST: 0.0.0.0
+      MONKEYCODE_PANEL_PORT: "4180"
+      MONKEYCODE_DATA_DIR: /data
+    ports:
+      - "127.0.0.1:4180:4180"
+    volumes:
+      - monkeycode-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4180/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  monkeycode-data:

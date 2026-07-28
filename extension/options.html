@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MonkeyCode Cookie Bridge</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <header>
+      <img src="icons/icon.png" alt="">
+      <div>
+        <h1>MonkeyCode Cookie Bridge</h1>
+        <p id="connection-summary">未连接</p>
+      </div>
+    </header>
+
+    <section id="pair-section">
+      <form id="pair-form">
+        <label>
+          <span>VPS 面板地址</span>
+          <input id="panel-url" name="panelUrl" type="url" placeholder="https://scheduler.example.com" required>
+        </label>
+        <label>
+          <span>配对码</span>
+          <input id="pair-code" name="code" type="text" autocomplete="one-time-code" maxlength="64" required>
+        </label>
+        <label>
+          <span>设备名称</span>
+          <input id="device-name" name="deviceName" type="text" maxlength="100" required>
+        </label>
+        <button type="submit">连接账号</button>
+      </form>
+    </section>
+
+    <section id="status-section" hidden>
+      <dl>
+        <div><dt>远程账号</dt><dd id="account-name">-</dd></div>
+        <div><dt>官网用户</dt><dd id="user-name">-</dd></div>
+        <div><dt>面板地址</dt><dd id="remote-panel">-</dd></div>
+        <div><dt>最近同步</dt><dd id="last-sync">-</dd></div>
+        <div><dt>Cookie 到期</dt><dd id="cookie-expiry">-</dd></div>
+        <div><dt>连接状态</dt><dd id="bridge-status">-</dd></div>
+      </dl>
+      <div class="actions">
+        <button id="sync-button" type="button">立即同步</button>
+        <button id="disconnect-button" class="secondary" type="button">断开连接</button>
+      </div>
+    </section>
+
+    <p id="message" role="status" aria-live="polite"></p>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+[Unit]
+Description=Send the daily prompt to an existing MonkeyCode task
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=monkeycode
+Group=monkeycode
+WorkingDirectory=/opt/monkeycode-daily
+EnvironmentFile=/etc/monkeycode-daily.env
+Environment=MONKEYCODE_STATE_FILE=/var/lib/monkeycode-daily/state.json
+ExecStart=/usr/bin/node /opt/monkeycode-daily/src/index.mjs
+StateDirectory=monkeycode-daily
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+TimeoutStartSec=90

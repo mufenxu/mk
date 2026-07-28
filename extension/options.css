@@ -1,0 +1,47 @@
+:root {
+  color-scheme: light dark;
+  font-family: Inter, "Noto Sans SC", system-ui, sans-serif;
+  background: #eef1f3;
+  color: #20272e;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 360px; background: #eef1f3; }
+main { width: min(620px, calc(100vw - 32px)); margin: 32px auto; background: #fff; border: 1px solid #d8dee3; border-radius: 8px; box-shadow: 0 14px 36px rgb(25 35 43 / 10%); overflow: hidden; }
+header { min-height: 82px; padding: 16px 20px; border-bottom: 1px solid #e1e6ea; display: flex; align-items: center; gap: 14px; }
+header img { width: 46px; height: 46px; object-fit: contain; }
+h1 { margin: 0; font-size: 18px; letter-spacing: 0; }
+header p { margin: 5px 0 0; color: #687681; font-size: 13px; }
+section { padding: 20px; }
+form { display: grid; gap: 15px; }
+label { display: grid; gap: 7px; font-size: 13px; font-weight: 650; }
+input { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid #c9d1d8; border-radius: 6px; background: #fff; color: #20272e; font: inherit; }
+input:focus { outline: 2px solid #2374b7; outline-offset: 1px; }
+button { min-height: 42px; padding: 9px 15px; border: 1px solid #1f6fab; border-radius: 6px; background: #2374b7; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+button:hover { background: #1d649d; }
+button.secondary { border-color: #c9d1d8; background: #fff; color: #34414b; }
+button.secondary:hover { background: #f2f5f7; }
+dl { margin: 0; display: grid; }
+dl div { min-height: 45px; padding: 10px 0; border-bottom: 1px solid #e6eaed; display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 14px; align-items: center; }
+dt { color: #687681; font-size: 12px; }
+dd { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
+.actions { margin-top: 18px; display: flex; gap: 10px; }
+.actions button { flex: 1; }
+#message { min-height: 20px; margin: 0; padding: 0 20px 20px; font-size: 13px; }
+#message.success { color: #176345; }
+#message.error { color: #9c252b; }
+
+@media (prefers-color-scheme: dark) {
+  :root, body { background: #171b1f; color: #eef2f5; }
+  main { background: #22282e; border-color: #39434b; }
+  header, dl div { border-color: #39434b; }
+  header p, dt { color: #aab4bc; }
+  input, button.secondary { background: #181d21; color: #eef2f5; border-color: #4a5660; }
+  button.secondary:hover { background: #2b333a; }
+}
+
+@media (max-width: 480px) {
+  main { margin: 16px auto; }
+  dl div { grid-template-columns: 1fr; gap: 4px; }
+  .actions { flex-direction: column; }
+}

@@ -1,0 +1,7 @@
+node_modules/
+data/
+.env
+.env.panel
+extension/*.zip
+.monkeycode-daily-state.json
+*.log

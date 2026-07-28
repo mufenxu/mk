@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the MonkeyCode daily sender at 09:00 Asia/Shanghai
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=30
+Unit=monkeycode-daily.service
+
+[Install]
+WantedBy=timers.target

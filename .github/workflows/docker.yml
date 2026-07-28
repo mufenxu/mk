@@ -1,0 +1,94 @@
+name: Build and publish Docker image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Run tests in Docker
+        run: docker build --target test --tag monkeycode-test:${GITHUB_SHA} .
+
+      - name: Build production image
+        shell: bash
+        run: |
+          image_name="${IMAGE_NAME,,}"
+          short_sha="${GITHUB_SHA::12}"
+          docker build \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "${image_name}:sha-${short_sha}" \
+            .
+          echo "IMAGE_NAME_LOWER=${image_name}" >> "${GITHUB_ENV}"
+          echo "SHORT_SHA=${short_sha}" >> "${GITHUB_ENV}"
+
+      - name: Smoke test production image
+        shell: bash
+        run: |
+          cleanup() {
+            docker rm --force monkeycode-smoke >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          master_key="$(openssl rand -base64 32)"
+          docker run --detach \
+            --name monkeycode-smoke \
+            --publish 127.0.0.1:4180:4180 \
+            --env MONKEYCODE_PANEL_PASSWORD=smoke-test-password-123456 \
+            --env MONKEYCODE_MASTER_KEY="${master_key}" \
+            --env MONKEYCODE_SECURE_COOKIE=false \
+            --env MONKEYCODE_BROWSER_BRIDGE_ENABLED=false \
+            "${IMAGE_NAME_LOWER}:sha-${SHORT_SHA}"
+          for attempt in {1..20}; do
+            if curl --fail --silent --show-error http://127.0.0.1:4180/api/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs monkeycode-smoke
+          exit 1
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login "${REGISTRY}" --username "${{ github.actor }}" --password-stdin
+
+      - name: Publish image
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          source_image="${IMAGE_NAME_LOWER}:sha-${SHORT_SHA}"
+          docker push "${source_image}"
+
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            docker tag "${source_image}" "${IMAGE_NAME_LOWER}:latest"
+            docker push "${IMAGE_NAME_LOWER}:latest"
+          fi
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            docker tag "${source_image}" "${IMAGE_NAME_LOWER}:${version}"
+            docker push "${IMAGE_NAME_LOWER}:${version}"
+          fi
