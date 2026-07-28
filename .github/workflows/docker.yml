@@ -11,15 +11,15 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: docker-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ghcr.io/${{ github.repository }}
+  REGISTRY: crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com
+  REGISTRY_USERNAME: mufenx
+  IMAGE_NAME: crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/my
 
 jobs:
   build:
@@ -70,13 +70,29 @@ jobs:
           docker logs monkeycode-smoke
           exit 1
 
-      - name: Log in to GHCR
+      - name: Check ACR credentials
+        id: acr
         if: github.event_name != 'pull_request'
         shell: bash
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login "${REGISTRY}" --username "${{ github.actor }}" --password-stdin
+        env:
+          ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+        run: |
+          if [[ -n "${ACR_PASSWORD}" ]]; then
+            echo "can-publish=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "can-publish=false" >> "${GITHUB_OUTPUT}"
+            echo "::warning::ALIYUN_ACR_PASSWORD is not configured; skipping image publication."
+          fi
+
+      - name: Log in to Alibaba Cloud ACR
+        if: github.event_name != 'pull_request' && steps.acr.outputs.can-publish == 'true'
+        shell: bash
+        env:
+          ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+        run: echo "${ACR_PASSWORD}" | docker login "${REGISTRY}" --username "${REGISTRY_USERNAME}" --password-stdin
 
       - name: Publish image
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && steps.acr.outputs.can-publish == 'true'
         shell: bash
         run: |
           source_image="${IMAGE_NAME_LOWER}:sha-${SHORT_SHA}"

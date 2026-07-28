@@ -164,7 +164,13 @@ npm run send
 
 ## Docker 与 GitHub Actions
 
-项目镜像只在 GitHub Actions 中构建并发布到 `ghcr.io/mufenxu/mk`。推送 `main` 后发布 `latest` 和 `sha-<提交号>`；推送 `v*` 标签后额外发布去掉 `v` 前缀的版本标签。Pull Request 只执行测试、构建和容器健康检查，不推送镜像。
+项目镜像只在 GitHub Actions 中构建，并发布到阿里云 ACR：
+
+```text
+crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/my
+```
+
+推送 `main` 后发布 `latest` 和 `sha-<提交号>`；推送 `v*` 标签后额外发布去掉 `v` 前缀的版本标签。Pull Request 只执行测试、构建和容器健康检查，不推送镜像。仓库需要配置 GitHub Actions Secret `ALIYUN_ACR_PASSWORD`，值为阿里云容器镜像服务个人版的固定登录密码；登录用户名和镜像地址已经固定在工作流中。密码不会写入代码、日志或镜像。
 
 VPS 创建 `/etc/monkeycode-panel.env`：
 
@@ -186,7 +192,7 @@ docker compose ps
 docker compose logs --tail=200 monkeycode-panel
 ```
 
-GHCR 私有镜像需要先在 VPS 使用仅有 `read:packages` 权限的 Personal Access Token Classic 登录。`docker compose down` 不删除命名卷，不能使用 `docker compose down -v`，否则会删除面板数据。
+如果阿里云仓库要求登录拉取，请在 VPS 使用相同的 ACR 用户名和固定密码执行 `docker login`。`docker compose down` 不删除命名卷，不能使用 `docker compose down -v`，否则会删除面板数据。
 
 ## 测试
 
