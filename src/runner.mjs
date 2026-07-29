@@ -42,6 +42,7 @@ function tokenTotal(snapshot) {
 
 function snapshotChanged(before, after, acceptedAt) {
   if (!after) return false;
+  if (before && after.status !== before.status) return true;
   if (before && tokenTotal(after) > tokenTotal(before)) return true;
   if (before && after.lastActiveAt && after.lastActiveAt !== before.lastActiveAt) return true;
   if (before && after.completedAt && after.completedAt !== before.completedAt) return true;

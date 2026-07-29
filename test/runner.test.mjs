@@ -82,8 +82,8 @@ test("emits one account warning before exact expiry and one expiry event after i
 test("tracks an acknowledged message until the remote task completes", async () => {
   let clock = 0;
   const snapshots = [
-    { status: "processing", lastActiveAt: "2026-07-27T01:00:01.000Z", stats: { totalTokens: 110 } },
-    { status: "finished", completedAt: "2026-07-27T01:00:02.000Z", stats: { totalTokens: 145 } },
+    { status: "processing", lastActiveAt: null, stats: { totalTokens: 100 } },
+    { status: "finished", completedAt: null, stats: { totalTokens: 145 } },
   ];
   const runner = new TaskRunner({}, {}, {
     now: () => clock,

@@ -59,6 +59,12 @@ function responseData(body, operation) {
 }
 
 function cleanRemoteTime(value) {
+  if (typeof value === "number" || (typeof value === "string" && /^\d+$/.test(value))) {
+    const timestamp = Number(value);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
+    const time = new Date(timestamp < 1_000_000_000_000 ? timestamp * 1_000 : timestamp);
+    return Number.isFinite(time.getTime()) ? time.toISOString() : null;
+  }
   if (typeof value !== "string" || !value || value.startsWith("0001-01-01")) return null;
   const time = new Date(value);
   return Number.isFinite(time.getTime()) ? time.toISOString() : null;

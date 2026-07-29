@@ -23,9 +23,9 @@ async function createRemoteMock() {
     content: "请确认项目状态",
     status: "processing",
     type: "develop",
-    created_at: "2026-07-27T03:50:46Z",
-    last_active_at: "2026-07-27T10:27:31Z",
-    completed_at: "0001-01-01T00:00:00Z",
+    created_at: 1785124246,
+    last_active_at: 1785148051,
+    completed_at: 0,
     model: {
       id: "model-1",
       provider: "monkeycode-basic",
@@ -110,6 +110,8 @@ test("remote snapshot uses only HTTP metadata APIs and removes sensitive fields"
     assert.equal(snapshot.subscription.plan, "basic");
     assert.equal(snapshot.wallet.dailyTokenLimit, 30000000);
     assert.equal(snapshot.tasks.length, 1);
+    assert.equal(snapshot.tasks[0].createdAt, "2026-07-27T03:50:46.000Z");
+    assert.equal(snapshot.tasks[0].lastActiveAt, "2026-07-27T10:27:31.000Z");
     assert.equal(snapshot.tasks[0].name, "项目部署状态确认");
     assert.equal(snapshot.tasks[0].completedAt, null);
     assert.equal(snapshot.tasks[0].environment.state, "running");
