@@ -3,7 +3,7 @@ import path from "node:path";
 
 import WebSocket from "ws";
 
-import { AuthExpiredError, RemoteError } from "./errors.mjs";
+import { AuthExpiredError, CancelledError, RemoteError } from "./errors.mjs";
 import {
   cookieHeader,
   dayKey,
@@ -15,6 +15,15 @@ import {
 } from "./protocol.mjs";
 
 const USER_AGENT = "monkeycode-daily-sender/1.0";
+
+function requestSignal(signal, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  timer.unref?.();
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener("abort", () => controller.abort(), { once: true });
+  return controller.signal;
+}
 
 async function requestJson(config, pathname, searchParams, options = {}) {
   const url = new URL(pathname, config.baseUrl);
@@ -31,9 +40,10 @@ async function requestJson(config, pathname, searchParams, options = {}) {
         "User-Agent": USER_AGENT,
       },
       redirect: "manual",
-      signal: AbortSignal.timeout(config.timeoutMs),
+      signal: requestSignal(config.signal, config.timeoutMs),
     });
   } catch (error) {
+    if (config.signal?.aborted) throw new CancelledError();
     throw new RemoteError(`Request failed for ${url.pathname}: ${error.message}`);
   }
 
@@ -303,11 +313,15 @@ export function sendUserInput(config) {
     const timer = setTimeout(() => {
       finish(new RemoteError("Timed out waiting for MonkeyCode to acknowledge the message"));
     }, config.timeoutMs);
+    const abort = () => finish(new CancelledError());
+    config.signal?.addEventListener("abort", abort, { once: true });
+    if (config.signal?.aborted) abort();
 
     function finish(error) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      config.signal?.removeEventListener("abort", abort);
       if (socket.readyState === WebSocket.OPEN) socket.close(1000);
       else if (socket.readyState === WebSocket.CONNECTING) socket.terminate();
       if (error) reject(error);
@@ -378,6 +392,7 @@ async function writeState(stateFile, state) {
 }
 
 export async function runOnce(config, options = {}) {
+  if (config.signal?.aborted) throw new CancelledError();
   const now = options.now ?? new Date();
   const log = options.log ?? (() => {});
   const today = dayKey(now, config.timeZone);

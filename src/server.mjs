@@ -291,6 +291,7 @@ export class PanelServer {
           accounts: config.accounts,
           tasks,
           running: this.runner.getRunning(),
+          queue: this.runner.getQueue(),
           logs: recentLogs.slice(0, 8),
           runStats: {
             days: 7,
@@ -307,6 +308,11 @@ export class PanelServer {
             diskFreeGb,
           },
         });
+        return;
+      }
+
+      if (url.pathname === "/api/runs/queue" && request.method === "DELETE") {
+        json(response, 200, await this.runner.cancelQueued());
         return;
       }
 
@@ -395,16 +401,18 @@ export class PanelServer {
         return;
       }
 
-      const taskMatch = /^\/api\/tasks\/([0-9a-f-]+)(?:\/(check-session|run|restore-prompt|clone))?$/.exec(url.pathname);
+      const taskMatch = /^\/api\/tasks\/([0-9a-f-]+)(?:\/(check-session|run|cancel|restore-prompt|clone))?$/.exec(url.pathname);
       if (taskMatch) {
         const [, taskId, action] = taskMatch;
         if (!action && request.method === "PUT") {
+          if (this.runner.isPending(taskId)) throw new ConfigError("Stop the task before changing its configuration");
           const task = await this.store.upsertTask(await readBody(request, 2 * 1024 * 1024), taskId);
           await this.environmentKeeper?.reconcile();
           json(response, 200, { task: this.taskSummary(task) });
           return;
         }
         if (!action && request.method === "DELETE") {
+          if (this.runner.isPending(taskId)) throw new ConfigError("Stop the task before deleting it");
           await this.store.deleteTask(taskId);
           await this.environmentKeeper?.reconcile();
           json(response, 200, { ok: true });
@@ -430,6 +438,11 @@ export class PanelServer {
           const mode = ["dry-run", "send", "force"].includes(body.mode) ? body.mode : "send";
           const started = this.runner.start(taskId, { trigger: "manual", mode });
           json(response, started.accepted ? 202 : 409, started);
+          return;
+        }
+        if (action === "cancel" && request.method === "POST") {
+          const result = await this.runner.cancel(taskId);
+          json(response, result.cancelled ? 200 : 409, result);
           return;
         }
         if (action === "restore-prompt" && request.method === "POST") {
@@ -477,7 +490,10 @@ export class PanelServer {
           const remoteSettings = await this.store.setRemoteSettings(body.remoteSettings);
           this.remoteSync?.configure(remoteSettings);
         }
-        if (body.operationsSettings) await this.store.setOperationsSettings(body.operationsSettings);
+        if (body.operationsSettings) {
+          const operationsSettings = await this.store.setOperationsSettings(body.operationsSettings);
+          this.runner.configure(operationsSettings);
+        }
         await this.environmentKeeper?.reconcile();
         const config = this.store.getPublicConfig();
         json(response, 200, {
@@ -517,8 +533,32 @@ export class PanelServer {
         });
         return;
       }
+      if (url.pathname === "/api/backups" && request.method === "GET") {
+        json(response, 200, { backups: await this.store.listBackups() });
+        return;
+      }
+      const backupMatch = /^\/api\/backups\/(config-[A-Za-z0-9.-]+\.json)(?:\/(restore))?$/.exec(url.pathname);
+      if (backupMatch) {
+        const [, backupId, action] = backupMatch;
+        if (!action && request.method === "GET") {
+          json(response, 200, { backup: await this.store.previewBackup(backupId) });
+          return;
+        }
+        if (action === "restore" && request.method === "POST") {
+          if (this.runner.hasPending()) throw new ConfigError("Stop running and queued tasks before restoring a backup");
+          const config = await this.store.restoreBackup(backupId);
+          this.runner.configure(config.operationsSettings);
+          this.remoteSync?.configure(config.remoteSettings);
+          await this.environmentKeeper?.reconcile();
+          json(response, 200, { config });
+          return;
+        }
+      }
       if (url.pathname === "/api/backup/import" && request.method === "POST") {
+        if (this.runner.hasPending()) throw new ConfigError("Stop running and queued tasks before importing a backup");
         const config = await this.store.importConfig(await readBody(request, 5 * 1024 * 1024));
+        this.runner.configure(config.operationsSettings);
+        this.remoteSync?.configure(config.remoteSettings);
         await this.environmentKeeper?.reconcile();
         json(response, 200, { config });
         return;

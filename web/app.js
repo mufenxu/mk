@@ -7,6 +7,7 @@ const state = {
   accounts: [],
   tasks: [],
   logs: [],
+  backups: [],
   settings: null,
   selectedTaskId: null,
   newTask: false,
@@ -57,6 +58,9 @@ const statusLabels = {
   off: "已关闭",
   "account-mismatch": "账号不匹配",
   running: "运行中",
+  queued: "排队中",
+  cancelled: "已取消",
+  "quota-blocked": "额度保护已阻止",
   processing: "运行中",
   pending: "等待中",
   finished: "已完成",
@@ -249,18 +253,20 @@ function environmentKeeperHtml(task, isNew) {
 }
 
 async function loadData() {
-  const [overview, accounts, tasks, settings, logs] = await Promise.all([
+  const [overview, accounts, tasks, settings, logs, backups] = await Promise.all([
     api("/api/overview"),
     api("/api/accounts"),
     api("/api/tasks"),
     api("/api/settings"),
     api("/api/logs?limit=500"),
+    state.page === "settings" ? api("/api/backups") : Promise.resolve({ backups: state.backups }),
   ]);
   state.overview = overview;
   state.accounts = accounts.accounts;
   state.tasks = tasks.tasks;
   state.settings = settings;
   state.logs = logs.logs;
+  state.backups = backups.backups;
   if (state.selectedTaskId && !state.tasks.some((task) => task.id === state.selectedTaskId)) {
     state.selectedTaskId = null;
     state.taskFormDirty = false;
@@ -320,7 +326,7 @@ function renderOverview() {
     $("#overview-tasks").innerHTML = `<table><thead><tr><th>任务</th><th>状态</th><th>账号 / 凭证</th><th>下一次执行</th><th>最近结果</th><th></th></tr></thead><tbody>${state.tasks.map((task) => {
       const log = latestTaskLog(task.id);
       const [sessionClass, sessionText] = credentialBadgeSpec(task.accountCredentialStatus);
-      return `<tr><td><div class="task-name"><span class="task-name-icon"><i data-lucide="message-square-text"></i></span><div><strong>${escapeHtml(task.name)}</strong><span>${escapeHtml(task.monkeyTaskId)}</span></div></div></td><td><div class="badge-stack">${task.running ? statusBadge("running") : task.enabled ? statusBadge("enabled", "已启用") : statusBadge("paused", "已暂停")}${environmentKeeperBadge(task)}</div></td><td><strong>${escapeHtml(task.accountName || "未选择账号")}</strong><div class="credential-line"><span class="badge ${sessionClass}">${sessionText}</span></div></td><td><strong>${escapeHtml(nextRunText(task.nextRun))}</strong><div class="muted">${task.nextRun ? escapeHtml(`${task.nextRun.localDate} ${task.nextRun.localTime}`) : "—"}</div></td><td>${log ? statusBadge(log.status) : '<span class="muted">暂无记录</span>'}</td><td><button class="icon-button" type="button" data-open-task="${task.id}" title="编辑任务" aria-label="编辑任务"><i data-lucide="chevron-right"></i></button></td></tr>`;
+      return `<tr><td><div class="task-name"><span class="task-name-icon"><i data-lucide="message-square-text"></i></span><div><strong>${escapeHtml(task.name)}</strong><span>${escapeHtml(task.monkeyTaskId)}</span></div></div></td><td><div class="badge-stack">${task.running ? statusBadge("running") : task.queued ? statusBadge("queued", `排队 ${task.queuePosition}`) : task.enabled ? statusBadge("enabled", "已启用") : statusBadge("paused", "已暂停")}${environmentKeeperBadge(task)}</div></td><td><strong>${escapeHtml(task.accountName || "未选择账号")}</strong><div class="credential-line"><span class="badge ${sessionClass}">${sessionText}</span></div></td><td><strong>${escapeHtml(nextRunText(task.nextRun))}</strong><div class="muted">${task.nextRun ? escapeHtml(`${task.nextRun.localDate} ${task.nextRun.localTime}`) : "—"}</div></td><td>${log ? statusBadge(log.status) : '<span class="muted">暂无记录</span>'}</td><td><button class="icon-button" type="button" data-open-task="${task.id}" title="编辑任务" aria-label="编辑任务"><i data-lucide="chevron-right"></i></button></td></tr>`;
     }).join("")}</tbody></table>`;
   }
 
@@ -580,7 +586,8 @@ function renderTaskList() {
     const keeperStatus = task.environmentKeepAlive?.status;
     const environmentText = keeperStatus === "connected" ? "环境已保持" : task.keepAwake ? (statusLabels[keeperStatus] || "环境待连接") : "环境保持关闭";
     const times = task.schedule.times?.length ? task.schedule.times.join("、") : task.schedule.time;
-    return `<button class="task-list-item ${!state.newTask && state.selectedTaskId === task.id ? "active" : ""}" type="button" data-select-task="${task.id}"><div><strong>${escapeHtml(task.name)}</strong><small>${task.enabled ? `${escapeHtml(times)} · ${scheduleModeText(task.schedule)}` : "调度已暂停"} · ${escapeHtml(environmentText)}</small></div><span class="status-dot ${task.running || ["connecting", "reconnecting", "starting"].includes(keeperStatus) ? "warn" : keeperStatus === "connected" ? "ok" : ""}"></span></button>`;
+    const runText = task.running ? "正在运行" : task.queued ? `队列第 ${task.queuePosition} 位` : task.enabled ? `${times} · ${scheduleModeText(task.schedule)}` : "调度已暂停";
+    return `<button class="task-list-item ${!state.newTask && state.selectedTaskId === task.id ? "active" : ""}" type="button" data-select-task="${task.id}"><div><strong>${escapeHtml(task.name)}</strong><small>${escapeHtml(runText)} · ${escapeHtml(environmentText)}</small></div><span class="status-dot ${task.running || task.queued || ["connecting", "reconnecting", "starting"].includes(keeperStatus) ? "warn" : keeperStatus === "connected" ? "ok" : ""}"></span></button>`;
   }).join("")}`;
 }
 
@@ -657,6 +664,7 @@ function renderTaskEditor() {
     return;
   }
   const isNew = state.newTask;
+  const pending = task.running || task.queued;
   const selectedAccount = state.accounts.find((account) => account.id === task.accountId);
   const sessionStatus = credentialBadgeSpec(selectedAccount?.credentialStatus ?? task.accountCredentialStatus);
   const accountOptions = state.accounts.length
@@ -665,8 +673,8 @@ function renderTaskEditor() {
   container.innerHTML = `<form id="task-form" class="task-form">
     <div class="editor-header"><div><h2>${isNew ? "创建定时任务" : escapeHtml(task.name)}</h2><p>${isNew ? "保存后可测试登录与发送" : escapeHtml(task.monkeyTaskId)}</p></div><div class="editor-actions">
       <button class="button secondary" type="button" data-task-action="check" ${isNew || !task.accountId ? "disabled" : ""} title="验证登录"><i data-lucide="shield-check"></i><span>验证</span></button>
-      <button class="button secondary" type="button" data-task-action="dry-run" ${isNew ? "disabled" : ""} title="模拟运行"><i data-lucide="flask-conical"></i><span>模拟</span></button>
-      <button class="button primary" type="button" data-task-action="send" ${isNew ? "disabled" : ""} title="立即发送"><i data-lucide="send"></i><span>发送</span></button>
+      <button class="button secondary" type="button" data-task-action="dry-run" ${isNew || pending ? "disabled" : ""} title="模拟运行"><i data-lucide="flask-conical"></i><span>模拟</span></button>
+      ${pending ? '<button class="button danger" type="button" data-task-action="stop" title="停止本次运行"><i data-lucide="square"></i><span>停止</span></button>' : `<button class="button primary" type="button" data-task-action="send" ${isNew ? "disabled" : ""} title="立即发送"><i data-lucide="send"></i><span>发送</span></button>`}
     </div></div>
     <section class="editor-section"><div class="editor-section-title"><div><h3>基础信息</h3><p>关联一个 MonkeyCode 对话任务</p></div></div>
       <div class="form-grid"><label class="field"><span>本地调度名称</span><input name="name" maxlength="80" value="${escapeHtml(task.name)}" required></label><div class="field"><span>发送账号</span><div class="account-select-line"><select name="accountId" aria-label="发送账号" required>${accountOptions}</select><button class="button secondary" type="button" data-add-account-from-task title="添加账号"><i data-lucide="user-plus"></i><span>添加</span></button></div><small id="task-account-hint" class="field-hint"><span class="badge ${sessionStatus[0]}">${sessionStatus[1]}</span>${selectedAccount ? ` ${escapeHtml(selectedAccount.name)}` : " 任务保存前必须选择账号"}</small></div>${remoteTaskPickerHtml(task.accountId, task.monkeyTaskId)}</div>
@@ -685,7 +693,7 @@ function renderTaskEditor() {
     <section class="editor-section"><div class="editor-section-title"><div><h3>完成追踪与失败保护</h3><p>消息接收后继续确认远端任务是否真正完成</p></div></div><div class="toggle-grid">${toggleHtml("completionEnabled", task.completion?.enabled !== false, "追踪远端完成状态", "完成或异常后再发送最终通知")}</div><div class="form-grid three"><label class="field"><span>完成超时（分钟）</span><input name="completionTimeoutMinutes" type="number" min="1" max="180" value="${task.completion?.timeoutMinutes ?? 30}"></label><label class="field"><span>检查间隔（秒）</span><input name="completionPollSeconds" type="number" min="5" max="60" value="${task.completion?.pollSeconds ?? 15}"></label><label class="field"><span>连续失败自动暂停</span><input name="autoPauseAfter" type="number" min="0" max="20" value="${task.failurePolicy?.autoPauseAfter ?? 3}"><small class="field-hint">填写 0 表示不自动暂停。</small></label></div></section>
     <section class="editor-section"><div class="editor-section-title"><div><h3>发送重试</h3><p>只重试接收前的网络及服务器错误，已接收消息不会重复发送</p></div></div><div class="form-grid"><label class="field"><span>最多尝试次数</span><input name="retryAttempts" type="number" min="1" max="5" value="${task.retry.attempts}"></label><label class="field"><span>重试间隔（分钟）</span><input name="retryDelayMinutes" type="number" min="0" max="60" value="${task.retry.delaySeconds / 60}"></label></div></section>
     ${!isNew && task.promptVersions?.length ? `<section class="editor-section"><div class="editor-section-title"><div><h3>提示词历史</h3><p>最近保留 20 个版本</p></div></div><div class="history-versions">${task.promptVersions.map((version) => `<div class="version-row"><div><p>${escapeHtml(version.prompt)}</p><time>${formatDate(version.createdAt, true)}</time></div><button class="icon-button" type="button" data-restore-version="${version.id}" title="恢复此版本" aria-label="恢复此版本"><i data-lucide="rotate-ccw"></i></button></div>`).join("")}</div></section>` : ""}
-    <div class="editor-footer"><div class="button-row">${isNew ? "" : '<button class="button secondary" type="button" data-task-action="force"><i data-lucide="send-horizontal"></i><span>强制发送</span></button><button class="icon-button" type="button" data-task-action="clone" title="复制任务" aria-label="复制任务"><i data-lucide="copy-plus"></i></button>'}</div><div class="button-row">${isNew ? '<button class="button secondary" type="button" data-task-action="cancel">取消</button>' : '<button class="button secondary" type="button" data-task-action="delete"><i data-lucide="trash-2"></i><span>删除</span></button>'}<button class="button primary" type="submit"><i data-lucide="save"></i><span>保存任务</span></button></div></div>
+    <div class="editor-footer"><div class="button-row">${isNew ? "" : `${pending ? "" : '<button class="button secondary" type="button" data-task-action="force"><i data-lucide="send-horizontal"></i><span>强制发送</span></button>'}<button class="icon-button" type="button" data-task-action="clone" title="复制任务" aria-label="复制任务"><i data-lucide="copy-plus"></i></button>`}</div><div class="button-row">${isNew ? '<button class="button secondary" type="button" data-task-action="cancel">取消</button>' : `<button class="button secondary" type="button" data-task-action="delete" ${pending ? "disabled" : ""}><i data-lucide="trash-2"></i><span>删除</span></button>`}<button class="button primary" type="submit" ${pending ? "disabled" : ""}><i data-lucide="save"></i><span>保存任务</span></button></div></div>
   </form>`;
 }
 
@@ -770,7 +778,7 @@ function filteredLogs() {
 function renderHistory() {
   const logs = filteredLogs();
   $("#history-table").innerHTML = logs.length ? `<table><thead><tr><th>时间</th><th>任务 / 账号 / 渠道</th><th>触发方式</th><th>结果</th><th>耗时</th><th>详情</th><th></th></tr></thead><tbody>${logs.map((log) => {
-    const canRerun = log.taskId && ["failed", "auth-expired", "completion-timeout", "auto-paused"].includes(log.status) && state.tasks.some((task) => task.id === log.taskId);
+    const canRerun = log.taskId && ["failed", "auth-expired", "completion-timeout", "auto-paused", "quota-blocked", "cancelled"].includes(log.status) && state.tasks.some((task) => task.id === log.taskId);
     return `<tr><td>${formatDate(log.at, true)}</td><td><strong>${escapeHtml(log.taskName || log.accountName || log.notificationName || "系统")}</strong></td><td>${escapeHtml(log.trigger === "schedule" ? "定时" : log.trigger === "manual" ? "手动" : log.type === "notification" ? "通知" : "系统")}</td><td>${statusBadge(log.status)}</td><td>${formatDuration(log.durationMs)}</td><td><div class="log-detail" title="${escapeHtml(log.detail)}">${escapeHtml(log.detail)}</div></td><td>${canRerun ? `<button class="icon-button" type="button" data-rerun-task="${log.taskId}" title="重新运行" aria-label="重新运行"><i data-lucide="refresh-cw"></i></button>` : ""}</td></tr>`;
   }).join("")}</tbody></table>` : emptyState("search-x", "没有符合当前筛选条件的记录。");
   icons();
@@ -779,14 +787,54 @@ function renderHistory() {
 function renderSettings() {
   if (!state.settings || !state.overview) return;
   $("#global-enabled").checked = state.settings.enabled;
-  const remoteSettings = state.settings.remoteSettings ?? { enabled: true, intervalMinutes: 10, quotaWarningPercent: 20 };
+  const remoteSettings = state.settings.remoteSettings ?? { enabled: true, intervalMinutes: 10, quotaWarningPercent: 20, quotaGuardEnabled: false, quotaReservePercent: 10, quotaReserveTokens: 0 };
   $("#remote-sync-enabled").checked = remoteSettings.enabled !== false;
   $("#remote-sync-interval").value = remoteSettings.intervalMinutes;
   $("#quota-warning-percent").value = String(remoteSettings.quotaWarningPercent);
+  $("#quota-guard-enabled").checked = remoteSettings.quotaGuardEnabled === true;
+  $("#quota-reserve-percent").value = String(remoteSettings.quotaReservePercent ?? 10);
+  $("#quota-reserve-tokens").value = String(remoteSettings.quotaReserveTokens ?? 0);
   $("#log-retention-days").value = String(state.settings.operationsSettings?.logRetentionDays ?? 90);
+  $("#account-concurrency").value = String(state.settings.operationsSettings?.accountConcurrency ?? 1);
+  const queued = state.overview.queue?.length ?? 0;
+  $("#queue-status").textContent = queued ? `当前有 ${queued} 个任务等待账号执行槽位。` : "当前没有等待中的任务。";
+  $("#cancel-queued-runs").disabled = queued === 0;
   $("#notification-list").innerHTML = state.settings.notifications.length ? state.settings.notifications.map((channel) => `<div class="notification-row"><span class="notification-icon"><i data-lucide="${notificationIcon(channel.type)}"></i></span><div class="notification-copy"><strong>${escapeHtml(channel.name)}</strong><p>${escapeHtml(notificationLabels[channel.type])} · ${channel.enabled ? "已启用" : "已暂停"} · ${channel.events.map((event) => notificationEventLabels[event] || event).join("、")}</p></div><div class="notification-actions"><button class="icon-button" type="button" data-notification-test="${channel.id}" title="发送测试" aria-label="发送测试"><i data-lucide="send"></i></button><button class="icon-button" type="button" data-notification-edit="${channel.id}" title="编辑" aria-label="编辑"><i data-lucide="pencil"></i></button><button class="icon-button" type="button" data-notification-delete="${channel.id}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button></div></div>`).join("") : emptyState("bell-off", "尚未配置通知渠道。");
   const system = state.overview.system;
   $("#system-info").innerHTML = `<div><dt>Node.js</dt><dd>${escapeHtml(system.node)}</dd></div><div><dt>常驻内存</dt><dd>${system.memoryMb} MB</dd></div><div><dt>数据盘可用</dt><dd>${system.diskFreeGb === null ? "—" : `${system.diskFreeGb} GB`}</dd></div><div><dt>运行时间</dt><dd>${Math.floor(system.uptimeSeconds / 3600)} 小时 ${Math.floor(system.uptimeSeconds % 3600 / 60)} 分</dd></div>`;
+  renderBackups();
+}
+
+function renderBackups() {
+  const container = $("#backup-list");
+  if (!state.backups.length) {
+    container.innerHTML = '<p class="muted">配置发生变更后会在这里显示自动快照。</p>';
+    return;
+  }
+  container.innerHTML = state.backups.slice(0, 10).map((backup) => {
+    const counts = backup.counts;
+    const detail = backup.valid
+      ? `${counts.accounts} 个账号 · ${counts.tasks} 个任务 · ${counts.notifications} 个通知渠道`
+      : "快照无法读取或主密钥不匹配";
+    return `<div class="notification-row"><span class="notification-icon"><i data-lucide="history"></i></span><div class="notification-copy"><strong>${formatDate(backup.createdAt, true)}</strong><p>${escapeHtml(detail)}</p></div><div class="notification-actions"><button class="icon-button" type="button" data-backup-restore="${escapeHtml(backup.id)}" ${backup.valid ? "" : "disabled"} title="预览并恢复" aria-label="预览并恢复"><i data-lucide="rotate-ccw"></i></button></div></div>`;
+  }).join("");
+}
+
+function backupChangeSummary(changes) {
+  if (!changes.totalChanges) return "该快照与当前配置没有可见差异。";
+  const groups = [
+    ["账号", changes.accounts],
+    ["任务", changes.tasks],
+    ["通知", changes.notifications],
+  ];
+  const parts = groups.flatMap(([label, group]) => [
+    group.added.length ? `${label}新增 ${group.added.length}` : null,
+    group.removed.length ? `${label}移除 ${group.removed.length}` : null,
+    group.changed.length ? `${label}修改 ${group.changed.length}` : null,
+  ]).filter(Boolean);
+  if (changes.settingsChanged) parts.push("系统设置变化");
+  if (changes.browserBridgesChanged) parts.push("浏览器连接变化");
+  return `${changes.totalChanges} 项差异：${parts.join("、")}。`;
 }
 
 function notificationIcon(type) {
@@ -862,6 +910,13 @@ function showPage(page) {
   $("#page-title").textContent = title;
   $("#page-eyebrow").textContent = eyebrow;
   const primary = $("#primary-action");
+  if (page === "settings") {
+    api("/api/backups").then((response) => {
+      state.backups = response.backups;
+      renderBackups();
+      icons();
+    }).catch((error) => toast(error.message, "error"));
+  }
   if (page === "overview" || page === "tasks") {
     primary.hidden = false;
     primary.title = "新建任务";
@@ -922,7 +977,7 @@ async function runTask(mode) {
   }
   try {
     const response = await api(`/api/tasks/${task.id}/run`, { method: "POST", body: { mode } });
-    toast(response.accepted ? "任务已开始，结果稍后显示在执行记录中" : "该任务正在运行", response.accepted ? "success" : "error");
+    toast(response.accepted ? (response.queued ? "任务已进入账号等待队列" : "任务已开始，结果稍后显示在执行记录中") : "该任务正在运行或等待", response.accepted ? "success" : "error");
     setTimeout(() => loadData().catch(() => {}), 1800);
   } catch (error) { toast(error.message, "error"); }
 }
@@ -1052,6 +1107,16 @@ document.addEventListener("click", async (event) => {
   const taskAction = event.target.closest("[data-task-action]")?.dataset.taskAction;
   if (taskAction === "cancel") { state.taskFormDirty = false; state.newTask = false; state.newTaskSeed = null; renderTaskList(); renderTaskEditor(); icons(); }
   if (["check", "dry-run", "send", "force"].includes(taskAction)) runTask(taskAction);
+  if (taskAction === "stop") {
+    const task = selectedTask();
+    if (task && await confirmAction("停止本次运行", task.queued ? "该任务将从等待队列中移除。" : "将停止本地请求和完成状态等待；远端已接收的消息无法撤回。", "停止")) {
+      try {
+        await api(`/api/tasks/${task.id}/cancel`, { method: "POST" });
+        await loadData();
+        toast("停止请求已处理");
+      } catch (error) { toast(error.message, "error"); }
+    }
+  }
   if (taskAction === "clone") {
     const task = selectedTask();
     if (task && await confirmAction("复制任务", `将创建“${task.name}”的停用副本，账号和提示词保持不变。`, "复制")) {
@@ -1081,10 +1146,26 @@ document.addEventListener("click", async (event) => {
     if (task && await confirmAction("重新运行", `将立即重新运行“${task.name}”，并保留防重复检查。`, "运行")) {
       try {
         const response = await api(`/api/tasks/${task.id}/run`, { method: "POST", body: { mode: "send" } });
-        toast(response.accepted ? "任务已重新开始" : "该任务正在运行", response.accepted ? "success" : "error");
+        toast(response.accepted ? (response.queued ? "任务已进入账号等待队列" : "任务已重新开始") : "该任务正在运行或等待", response.accepted ? "success" : "error");
         setTimeout(() => loadData().catch(() => {}), 1800);
       } catch (error) { toast(error.message, "error"); }
     }
+  }
+
+  const restoreBackup = event.target.closest("[data-backup-restore]");
+  if (restoreBackup) {
+    try {
+      const response = await api(`/api/backups/${encodeURIComponent(restoreBackup.dataset.backupRestore)}`);
+      const summary = backupChangeSummary(response.backup.changes);
+      const confirmed = await confirmAction("恢复配置快照", `${summary} 当前配置会先自动生成一个新快照。`, "恢复");
+      if (confirmed) {
+        await api(`/api/backups/${encodeURIComponent(restoreBackup.dataset.backupRestore)}/restore`, { method: "POST" });
+        state.selectedTaskId = null;
+        state.taskFormDirty = false;
+        await loadData();
+        toast("配置快照已恢复");
+      }
+    } catch (error) { toast(error.message, "error"); }
   }
 
   if (event.target.closest("#add-notification") || (event.target.closest("#primary-action") && state.page === "settings")) openNotificationDialog();
@@ -1246,6 +1327,9 @@ $("#remote-settings-form").addEventListener("submit", async (event) => {
           enabled: form.get("enabled") === "on",
           intervalMinutes: Number(form.get("intervalMinutes")),
           quotaWarningPercent: Number(form.get("quotaWarningPercent")),
+          quotaGuardEnabled: form.get("quotaGuardEnabled") === "on",
+          quotaReservePercent: Number(form.get("quotaReservePercent")),
+          quotaReserveTokens: Number(form.get("quotaReserveTokens")),
         },
       },
     });
@@ -1265,12 +1349,25 @@ $("#operations-settings-form").addEventListener("submit", async (event) => {
   try {
     const response = await api("/api/settings", {
       method: "PUT",
-      body: { operationsSettings: { logRetentionDays: Number(form.get("logRetentionDays")) } },
+      body: { operationsSettings: {
+        logRetentionDays: Number(form.get("logRetentionDays")),
+        accountConcurrency: Number(form.get("accountConcurrency")),
+      } },
     });
     state.settings.operationsSettings = response.operationsSettings;
     state.settingsFormDirty = false;
     renderSettings();
-    toast("运行记录设置已保存");
+    toast("执行队列与运行记录设置已保存");
+  } catch (error) { toast(error.message, "error"); }
+});
+
+$("#cancel-queued-runs").addEventListener("click", async () => {
+  const queued = state.overview?.queue?.length ?? 0;
+  if (!queued || !await confirmAction("清空等待队列", `将取消 ${queued} 个尚未开始的任务，正在运行的任务不受影响。`, "清空")) return;
+  try {
+    const result = await api("/api/runs/queue", { method: "DELETE" });
+    await loadData();
+    toast(`已取消 ${result.cancelled} 个等待任务`);
   } catch (error) { toast(error.message, "error"); }
 });
 

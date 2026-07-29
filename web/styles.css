@@ -103,10 +103,10 @@ tbody tr:hover { background: #fafbfc; }
 .badge { min-height: 22px; padding: 3px 8px; border-radius: 11px; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 650; white-space: nowrap; }
 .badge.sent, .badge.completed, .badge.valid, .badge.enabled, .badge.connected { color: var(--green); background: var(--green-soft); }
 .badge.failed, .badge.auth-expired, .badge.completion-timeout, .badge.auto-paused, .badge.invalid, .badge.expired { color: var(--red); background: var(--red-soft); }
-.badge.duplicate, .badge.dry-run, .badge.paused, .badge.unknown, .badge.session-warning, .badge.expiring { color: var(--amber); background: var(--amber-soft); }
+.badge.duplicate, .badge.dry-run, .badge.paused, .badge.unknown, .badge.session-warning, .badge.expiring, .badge.queued, .badge.quota-blocked { color: var(--amber); background: var(--amber-soft); }
 .badge.accepted, .badge.running, .badge.connecting, .badge.starting { color: var(--accent); background: var(--accent-soft); }
 .badge.reconnecting { color: var(--amber); background: var(--amber-soft); }
-.badge.off { color: var(--text-soft); background: var(--surface-muted); }
+.badge.off, .badge.cancelled { color: var(--text-soft); background: var(--surface-muted); }
 .badge-stack { display: flex; flex-wrap: wrap; gap: 5px; }
 .badge.processing, .badge.synced { color: var(--accent); background: var(--accent-soft); }
 .badge.pending { color: var(--amber); background: var(--amber-soft); }

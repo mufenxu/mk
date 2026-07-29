@@ -125,3 +125,105 @@ test("automatically pauses a task after consecutive scheduled failures", async (
   assert.equal(logs[0].status, "auto-paused");
   assert.deepEqual(notices, ["auto-paused"]);
 });
+
+test("queues tasks that share an account and starts the next task after completion", async () => {
+  const tasks = new Map([
+    ["task-1", { id: "task-1", name: "First", accountId: "account-1" }],
+    ["task-2", { id: "task-2", name: "Second", accountId: "account-1" }],
+  ]);
+  const store = {
+    getPublicConfig: () => ({ operationsSettings: { accountConcurrency: 1 } }),
+    getTask: (id) => tasks.get(id),
+  };
+  const runner = new TaskRunner(store, {});
+  const started = [];
+  let releaseFirst;
+  runner.execute = async (id) => {
+    started.push(id);
+    if (id === "task-1") await new Promise((resolve) => { releaseFirst = resolve; });
+    return { status: "completed" };
+  };
+
+  const first = runner.start("task-1");
+  const firstPromise = runner.getPendingPromise("task-1");
+  const second = runner.start("task-2");
+  const secondPromise = runner.getPendingPromise("task-2");
+  await Promise.resolve();
+
+  assert.equal(first.queued, false);
+  assert.equal(second.queued, true);
+  assert.deepEqual(started, ["task-1"]);
+  assert.equal(runner.getQueue()[0].position, 1);
+
+  releaseFirst();
+  await firstPromise;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(started, ["task-1", "task-2"]);
+  await secondPromise;
+});
+
+test("cancels a queued task without interrupting the active task", async () => {
+  const tasks = new Map([
+    ["task-1", { id: "task-1", name: "First", accountId: "account-1" }],
+    ["task-2", { id: "task-2", name: "Second", accountId: "account-1" }],
+  ]);
+  const logs = [];
+  let releaseFirst;
+  const store = {
+    getPublicConfig: () => ({ operationsSettings: { accountConcurrency: 1 } }),
+    getTask: (id) => tasks.get(id),
+    appendLog: async (entry) => { logs.push(entry); },
+  };
+  const runner = new TaskRunner(store, {});
+  runner.execute = async (id) => {
+    if (id === "task-1") await new Promise((resolve) => { releaseFirst = resolve; });
+    return { status: "completed" };
+  };
+
+  runner.start("task-1");
+  runner.start("task-2");
+  const queuedPromise = runner.getPendingPromise("task-2");
+  await Promise.resolve();
+  const cancelled = await runner.cancel("task-2");
+
+  assert.deepEqual(cancelled, { cancelled: true, state: "queued" });
+  assert.equal((await queuedPromise).status, "cancelled");
+  assert.equal(runner.getQueue().length, 0);
+  assert.equal(logs[0].status, "cancelled");
+  releaseFirst();
+});
+
+test("blocks a normal send when the configured quota reserve is reached", async () => {
+  const task = {
+    id: "task-1",
+    name: "Daily report",
+    accountId: "account-1",
+    monkeyTaskId: "remote-task",
+    baseUrl: "https://monkeycode-ai.com",
+    session: "session",
+    prompt: "Report",
+    dryRun: false,
+    retry: { attempts: 3, delaySeconds: 0 },
+    completion: { enabled: false },
+    schedule: { timeZone: "Asia/Shanghai" },
+  };
+  const logs = [];
+  const notices = [];
+  const store = {
+    getTask: () => task,
+    getPublicConfig: () => ({
+      operationsSettings: { accountConcurrency: 1 },
+      remoteSettings: { quotaGuardEnabled: true, quotaReservePercent: 10, quotaReserveTokens: 1_000 },
+    }),
+    getAccount: () => ({ remoteSnapshot: { wallet: { dailyTokenBalance: 900, dailyTokenLimit: 10_000 } } }),
+    appendLog: async (entry) => { logs.push(entry); },
+  };
+  const runner = new TaskRunner(store, { notify: async (event) => { notices.push(event); } });
+
+  const result = await runner.execute(task.id, { mode: "send" });
+
+  assert.equal(result.status, "quota-blocked");
+  assert.equal(result.attempts, 0);
+  assert.equal(logs[0].status, "quota-blocked");
+  assert.deepEqual(notices, ["quota-low"]);
+});

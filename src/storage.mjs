@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { ConfigError } from "./errors.mjs";
@@ -12,6 +12,7 @@ const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const COOKIE = /^[A-Za-z0-9._~-]+$/;
 const TOKEN_HASH = /^[0-9a-f]{64}$/;
 const EXTENSION_ORIGIN = /^chrome-extension:\/\/[a-p]{32}$/;
+const BACKUP_FILE = /^config-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f-]{36}\.json$/i;
 const BRIDGE_STATUSES = new Set(["connected", "valid", "invalid", "account-mismatch"]);
 
 function cleanText(value, name, max, { required = true } = {}) {
@@ -110,11 +111,83 @@ function cleanFailurePolicy(input = {}) {
   };
 }
 
+function cleanRemoteSettings(input = {}, fallback = {}) {
+  return {
+    enabled: cleanBoolean(input.enabled, fallback.enabled ?? true),
+    intervalMinutes: cleanInteger(input.intervalMinutes, fallback.intervalMinutes ?? 10, 1, 1440, "Remote sync interval"),
+    quotaWarningPercent: cleanInteger(input.quotaWarningPercent, fallback.quotaWarningPercent ?? 20, 1, 50, "Quota warning percent"),
+    quotaGuardEnabled: cleanBoolean(input.quotaGuardEnabled, fallback.quotaGuardEnabled ?? false),
+    quotaReservePercent: cleanInteger(input.quotaReservePercent, fallback.quotaReservePercent ?? 10, 1, 50, "Quota reserve percent"),
+    quotaReserveTokens: cleanInteger(input.quotaReserveTokens, fallback.quotaReserveTokens ?? 0, 0, 1_000_000_000, "Quota reserve tokens"),
+  };
+}
+
 function cleanOperationsSettings(input = {}) {
   return {
     logRetentionDays: cleanInteger(input.logRetentionDays, 90, 7, 365, "Log retention days"),
     maxLogEntries: cleanInteger(input.maxLogEntries, 20_000, 1_000, 100_000, "Maximum log entries"),
+    accountConcurrency: cleanInteger(input.accountConcurrency, 1, 1, 5, "Account concurrency"),
   };
+}
+
+function collectionDiff(current, target, project) {
+  const currentById = new Map(current.map((item) => [item.id, item]));
+  const targetById = new Map(target.map((item) => [item.id, item]));
+  const label = (item) => item.name || item.id;
+  return {
+    added: target.filter((item) => !currentById.has(item.id)).map(label),
+    removed: current.filter((item) => !targetById.has(item.id)).map(label),
+    changed: target.filter((item) => {
+      const before = currentById.get(item.id);
+      return before && JSON.stringify(project(before)) !== JSON.stringify(project(item));
+    }).map(label),
+  };
+}
+
+function backupDiff(current, target) {
+  const accounts = collectionDiff(current.accounts ?? [], target.accounts ?? [], (account) => ({
+    name: account.name,
+    baseUrl: account.baseUrl,
+    sessionEncrypted: account.sessionEncrypted ?? null,
+  }));
+  const tasks = collectionDiff(current.tasks ?? [], target.tasks ?? [], (task) => ({
+    name: task.name,
+    accountId: task.accountId,
+    monkeyTaskId: task.monkeyTaskId,
+    enabled: task.enabled,
+    keepAwake: task.keepAwake,
+    dryRun: task.dryRun,
+    dedupe: task.dedupe,
+    prompt: task.prompt,
+    schedule: task.schedule,
+    retry: task.retry,
+    completion: task.completion,
+    failurePolicy: task.failurePolicy,
+  }));
+  const notifications = collectionDiff(current.notifications ?? [], target.notifications ?? [], (channel) => ({
+    name: channel.name,
+    type: channel.type,
+    enabled: channel.enabled,
+    events: channel.events,
+    settings: channel.settings,
+    secretEncrypted: channel.secretEncrypted ?? null,
+  }));
+  const settingsChanged = JSON.stringify({
+    enabled: current.enabled,
+    remoteSettings: cleanRemoteSettings(current.remoteSettings),
+    operationsSettings: cleanOperationsSettings(current.operationsSettings),
+  }) !== JSON.stringify({
+    enabled: target.enabled,
+    remoteSettings: cleanRemoteSettings(target.remoteSettings),
+    operationsSettings: cleanOperationsSettings(target.operationsSettings),
+  });
+  const browserBridgesChanged = JSON.stringify(current.browserBridges ?? []) !== JSON.stringify(target.browserBridges ?? []);
+  const totalChanges = [accounts, tasks, notifications]
+    .flatMap((group) => [group.added, group.removed, group.changed])
+    .reduce((total, items) => total + items.length, 0)
+    + Number(settingsChanged)
+    + Number(browserBridgesChanged);
+  return { accounts, tasks, notifications, settingsChanged, browserBridgesChanged, totalChanges };
 }
 
 function cleanRetry(input = {}) {
@@ -223,14 +296,14 @@ export class DataStore {
     try {
       const loaded = JSON.parse(await readFile(this.configFile, "utf8"));
       this.validateEncryptedConfig(loaded);
-      this.config = this.migrateConfig(loaded);
+      this.config = this.normalizeConfig(loaded);
       if (loaded.version !== this.config.version) await this.writeConfig();
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
       this.config = {
         version: 8,
         enabled: true,
-        remoteSettings: { enabled: true, intervalMinutes: 10, quotaWarningPercent: 20 },
+        remoteSettings: cleanRemoteSettings(),
         operationsSettings: cleanOperationsSettings(),
         accounts: [],
         tasks: [],
@@ -356,11 +429,7 @@ export class DataStore {
     return {
       ...config,
       version: 6,
-      remoteSettings: {
-        enabled: config.remoteSettings?.enabled !== false,
-        intervalMinutes: Number.isInteger(config.remoteSettings?.intervalMinutes) ? config.remoteSettings.intervalMinutes : 10,
-        quotaWarningPercent: Number.isInteger(config.remoteSettings?.quotaWarningPercent) ? config.remoteSettings.quotaWarningPercent : 20,
-      },
+      remoteSettings: cleanRemoteSettings(config.remoteSettings),
     };
   }
 
@@ -399,6 +468,13 @@ export class DataStore {
     return config;
   }
 
+  normalizeConfig(config) {
+    const normalized = this.migrateConfig(config);
+    normalized.remoteSettings = cleanRemoteSettings(normalized.remoteSettings);
+    normalized.operationsSettings = cleanOperationsSettings(normalized.operationsSettings);
+    return normalized;
+  }
+
   publicAccount(account) {
     const { sessionEncrypted: _session, ...safe } = account;
     return {
@@ -432,8 +508,8 @@ export class DataStore {
     return {
       version: this.config.version,
       enabled: this.config.enabled,
-      remoteSettings: structuredClone(this.config.remoteSettings),
-      operationsSettings: structuredClone(this.config.operationsSettings),
+      remoteSettings: cleanRemoteSettings(this.config.remoteSettings),
+      operationsSettings: cleanOperationsSettings(this.config.operationsSettings),
       updatedAt: this.config.updatedAt,
       accounts: this.config.accounts.map((account) => this.publicAccount(account)),
       tasks: this.config.tasks.map((task) => this.publicTask(task)),
@@ -854,13 +930,7 @@ export class DataStore {
   }
 
   async setRemoteSettings(input = {}) {
-    const intervalMinutes = cleanInteger(input.intervalMinutes, this.config.remoteSettings?.intervalMinutes ?? 10, 1, 1440, "Remote sync interval");
-    const quotaWarningPercent = cleanInteger(input.quotaWarningPercent, this.config.remoteSettings?.quotaWarningPercent ?? 20, 1, 50, "Quota warning percent");
-    this.config.remoteSettings = {
-      enabled: cleanBoolean(input.enabled, this.config.remoteSettings?.enabled ?? true),
-      intervalMinutes,
-      quotaWarningPercent,
-    };
+    this.config.remoteSettings = cleanRemoteSettings(input, cleanRemoteSettings(this.config.remoteSettings));
     await this.writeConfig();
     return structuredClone(this.config.remoteSettings);
   }
@@ -1000,13 +1070,83 @@ export class DataStore {
     return path.join(this.stateDir, `${taskId}.json`);
   }
 
+  backupPath(id) {
+    if (typeof id !== "string" || !BACKUP_FILE.test(id)) throw new ConfigError("Backup identifier is invalid");
+    return path.join(this.backupDir, id);
+  }
+
+  async readBackup(id) {
+    let backup;
+    try {
+      backup = JSON.parse(await readFile(this.backupPath(id), "utf8"));
+    } catch (error) {
+      if (error.code === "ENOENT") throw new ConfigError("Backup not found");
+      if (error instanceof SyntaxError) throw new ConfigError("Backup file is invalid");
+      throw error;
+    }
+    this.validateEncryptedConfig(backup);
+    return this.normalizeConfig(structuredClone(backup));
+  }
+
+  async listBackups() {
+    const files = (await readdir(this.backupDir)).filter((name) => BACKUP_FILE.test(name)).sort().reverse();
+    return Promise.all(files.map(async (id) => {
+      try {
+        const [backup, metadata] = await Promise.all([this.readBackup(id), stat(this.backupPath(id))]);
+        return {
+          id,
+          createdAt: metadata.mtime.toISOString(),
+          sourceUpdatedAt: backup.updatedAt ?? null,
+          version: backup.version,
+          valid: true,
+          counts: {
+            accounts: backup.accounts?.length ?? 0,
+            tasks: backup.tasks?.length ?? 0,
+            notifications: backup.notifications?.length ?? 0,
+          },
+        };
+      } catch {
+        return { id, createdAt: null, sourceUpdatedAt: null, version: null, valid: false, counts: null };
+      }
+    }));
+  }
+
+  async previewBackup(id) {
+    const backup = await this.readBackup(id);
+    const metadata = await stat(this.backupPath(id));
+    return {
+      id,
+      createdAt: metadata.mtime.toISOString(),
+      sourceUpdatedAt: backup.updatedAt ?? null,
+      version: backup.version,
+      counts: {
+        accounts: backup.accounts?.length ?? 0,
+        tasks: backup.tasks?.length ?? 0,
+        notifications: backup.notifications?.length ?? 0,
+      },
+      changes: backupDiff(this.config, backup),
+    };
+  }
+
+  async restoreBackup(id) {
+    const backup = await this.readBackup(id);
+    this.config = backup;
+    await this.writeConfig();
+    return this.getPublicConfig();
+  }
+
   async exportConfig() {
-    return { ...structuredClone(this.config), browserBridges: [] };
+    return {
+      ...structuredClone(this.config),
+      remoteSettings: cleanRemoteSettings(this.config.remoteSettings),
+      operationsSettings: cleanOperationsSettings(this.config.operationsSettings),
+      browserBridges: [],
+    };
   }
 
   async importConfig(config) {
     this.validateEncryptedConfig(config);
-    this.config = this.migrateConfig(structuredClone(config));
+    this.config = this.normalizeConfig(structuredClone(config));
     this.config.updatedAt = new Date().toISOString();
     await this.writeConfig();
     return this.getPublicConfig();

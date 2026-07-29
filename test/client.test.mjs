@@ -8,12 +8,12 @@ import test from "node:test";
 import { WebSocketServer } from "ws";
 
 import { checkSession, runOnce } from "../src/client.mjs";
-import { AuthExpiredError } from "../src/errors.mjs";
+import { AuthExpiredError, CancelledError } from "../src/errors.mjs";
 
 const session = "test-session-value";
 const taskId = "678fed52-b2a8-467f-a94c-3b0fde6f1c89";
 
-async function createMock({ history = [], authenticated = true } = {}) {
+async function createMock({ history = [], authenticated = true, acknowledge = true } = {}) {
   let websocketConnections = 0;
   let receivedPrompt = null;
   const server = createServer((request, response) => {
@@ -57,7 +57,7 @@ async function createMock({ history = [], authenticated = true } = {}) {
       const event = JSON.parse(raw.toString("utf8"));
       const inner = JSON.parse(Buffer.from(event.data, "base64").toString("utf8"));
       receivedPrompt = Buffer.from(inner.content, "base64").toString("utf8");
-      webSocket.send(JSON.stringify({ type: "user-input", data: event.data }));
+      if (acknowledge) webSocket.send(JSON.stringify({ type: "user-input", data: event.data }));
     });
   });
 
@@ -142,5 +142,23 @@ test("treats an anonymous status response as expired authentication", async () =
     );
   } finally {
     await mock.close();
+  }
+});
+
+test("cancels an in-flight WebSocket send", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "monkeycode-daily-"));
+  const mock = await createMock({ acknowledge: false });
+  const controller = new AbortController();
+  try {
+    const run = runOnce(makeConfig(mock.baseUrl, path.join(directory, "state.json"), { signal: controller.signal }));
+    for (let attempt = 0; attempt < 20 && !mock.receivedPrompt; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(mock.receivedPrompt, "生成今天的项目进展摘要");
+    controller.abort();
+    await assert.rejects(run, CancelledError);
+  } finally {
+    await mock.close();
+    await rm(directory, { recursive: true, force: true });
   }
 });

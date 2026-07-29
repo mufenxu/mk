@@ -146,6 +146,27 @@ test("panel auth and task APIs keep the MonkeyCode cookie encrypted", async () =
     const backup = JSON.parse(await readFile(path.join(directory, "backups", backupFiles[0]), "utf8"));
     assert.deepEqual(backup.tasks, []);
 
+    const backupList = await fetch(`${baseUrl}/api/backups`, { headers: { Cookie: cookie } });
+    assert.equal(backupList.status, 200);
+    const listedBackups = (await backupList.json()).backups;
+    assert.equal(listedBackups.length, 1);
+    assert.equal(listedBackups[0].valid, true);
+    assert.deepEqual(listedBackups[0].counts, { accounts: 0, tasks: 0, notifications: 0 });
+
+    const preview = await fetch(`${baseUrl}/api/backups/${listedBackups[0].id}`, { headers: { Cookie: cookie } });
+    assert.equal(preview.status, 200);
+    const previewBody = await preview.json();
+    assert.equal(previewBody.backup.changes.tasks.removed.length, 1);
+    assert.equal(previewBody.backup.changes.totalChanges >= 1, true);
+
+    const restored = await fetch(`${baseUrl}/api/backups/${listedBackups[0].id}/restore`, {
+      method: "POST",
+      headers: { Cookie: cookie, "X-CSRF-Token": auth.csrf },
+    });
+    assert.equal(restored.status, 200);
+    assert.equal((await restored.json()).config.tasks.length, 0);
+    assert.equal(store.getPublicConfig().tasks.length, 0);
+
     await store.appendLog({ type: "task-run", status: "sent", detail: "test" });
     const cleared = await fetch(`${baseUrl}/api/logs`, {
       method: "DELETE",
@@ -274,6 +295,9 @@ test("version 5 configuration gains persistent remote sync defaults", async () =
       enabled: true,
       intervalMinutes: 10,
       quotaWarningPercent: 20,
+      quotaGuardEnabled: false,
+      quotaReservePercent: 10,
+      quotaReserveTokens: 0,
     });
     const current = JSON.parse(await readFile(path.join(directory, "config.json"), "utf8"));
     assert.equal(current.version, 8);

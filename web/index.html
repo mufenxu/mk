@@ -111,7 +111,7 @@
       <section id="page-history" class="page" aria-labelledby="page-title">
         <div class="filterbar">
           <label class="compact-field"><span>任务</span><select id="log-task-filter"><option value="">全部任务</option></select></label>
-          <label class="compact-field"><span>结果</span><select id="log-status-filter"><option value="">全部结果</option><option value="accepted">已接收</option><option value="completed">远端完成</option><option value="completion-timeout">完成确认超时</option><option value="sent">发送成功</option><option value="synced">同步成功</option><option value="duplicate">重复跳过</option><option value="dry-run">模拟运行</option><option value="auto-paused">自动暂停</option><option value="session-warning">凭证即将到期</option><option value="auth-expired">登录失效</option><option value="failed">失败</option></select></label>
+          <label class="compact-field"><span>结果</span><select id="log-status-filter"><option value="">全部结果</option><option value="accepted">已接收</option><option value="completed">远端完成</option><option value="completion-timeout">完成确认超时</option><option value="sent">发送成功</option><option value="synced">同步成功</option><option value="duplicate">重复跳过</option><option value="dry-run">模拟运行</option><option value="quota-blocked">额度保护已阻止</option><option value="cancelled">已取消</option><option value="auto-paused">自动暂停</option><option value="session-warning">凭证即将到期</option><option value="auth-expired">登录失效</option><option value="failed">失败</option></select></label>
           <div class="filter-actions">
             <button id="export-logs" class="button secondary" type="button"><i data-lucide="download"></i><span>导出 CSV</span></button>
             <button id="clear-logs" class="button secondary" type="button"><i data-lucide="trash-2"></i><span>清理记录</span></button>
@@ -130,11 +130,12 @@
           </section>
           <section class="settings-section">
             <form id="operations-settings-form">
-              <div class="section-heading compact"><div><h2>运行记录</h2><p>自动清理过期记录并限制日志文件增长</p></div></div>
+              <div class="section-heading compact"><div><h2>执行队列与运行记录</h2><p id="queue-status">限制同一账号并发，并自动清理过期记录</p></div><button id="cancel-queued-runs" class="button secondary" type="button"><i data-lucide="list-x"></i><span>清空等待队列</span></button></div>
               <div class="form-grid settings-fields">
                 <label class="field"><span>保留天数</span><input id="log-retention-days" name="logRetentionDays" type="number" min="7" max="365" required></label>
+                <label class="field"><span>单账号并发上限</span><input id="account-concurrency" name="accountConcurrency" type="number" min="1" max="5" required><small class="field-hint">超出上限的任务按进入顺序等待。</small></label>
               </div>
-              <div class="settings-actions"><button class="button secondary" type="submit"><i data-lucide="save"></i><span>保存记录设置</span></button></div>
+              <div class="settings-actions"><button class="button secondary" type="submit"><i data-lucide="save"></i><span>保存队列与记录设置</span></button></div>
             </form>
           </section>
           <section class="settings-section">
@@ -146,7 +147,10 @@
               <div class="form-grid settings-fields">
                 <label class="field"><span>同步间隔（分钟）</span><input id="remote-sync-interval" name="intervalMinutes" type="number" min="1" max="1440" required></label>
                 <label class="field"><span>额度提醒阈值</span><select id="quota-warning-percent" name="quotaWarningPercent"><option value="5">剩余 5%</option><option value="10">剩余 10%</option><option value="20">剩余 20%</option><option value="30">剩余 30%</option><option value="50">剩余 50%</option></select></label>
+                <label class="field"><span>发送保留比例</span><select id="quota-reserve-percent" name="quotaReservePercent"><option value="5">保留 5%</option><option value="10">保留 10%</option><option value="20">保留 20%</option><option value="30">保留 30%</option><option value="50">保留 50%</option></select></label>
+                <label class="field"><span>发送保留 Token</span><input id="quota-reserve-tokens" name="quotaReserveTokens" type="number" min="0" max="1000000000" required><small class="field-hint">比例或 Token 任一达到阈值即停止普通发送。</small></label>
               </div>
+              <div class="toggle-grid settings-fields"><div class="toggle-row"><div><strong>启用额度保护</strong><small>额度未同步或低于保留值时阻止普通发送，强制发送仍可绕过。</small></div><label class="switch"><input id="quota-guard-enabled" name="quotaGuardEnabled" type="checkbox"><span></span></label></div></div>
               <div class="settings-actions"><button class="button secondary" type="submit"><i data-lucide="save"></i><span>保存同步设置</span></button></div>
             </form>
           </section>
@@ -163,6 +167,7 @@
               <button id="export-backup" class="button secondary" type="button"><i data-lucide="archive"></i><span>导出备份</span></button>
               <label class="button secondary file-button"><i data-lucide="upload"></i><span>导入备份</span><input id="import-backup" type="file" accept="application/json,.json"></label>
             </div>
+            <div id="backup-list" class="notification-list"></div>
           </section>
           <section class="settings-section">
             <div class="section-heading compact"><div><h2>运行环境</h2><p>当前面板进程状态</p></div></div>

@@ -20,6 +20,13 @@ export class RemoteError extends Error {
   }
 }
 
+export class CancelledError extends Error {
+  constructor(message = "Task run was cancelled") {
+    super(message);
+    this.name = "CancelledError";
+  }
+}
+
 export class BridgeError extends Error {
   constructor(message, status = 400, code = "browser-bridge-error") {
     super(message);
