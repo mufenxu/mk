@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     init: true
     env_file:
-      - /etc/monkeycode-panel.env
+      - .env
     environment:
       MONKEYCODE_PANEL_HOST: 0.0.0.0
       MONKEYCODE_PANEL_PORT: "4180"
@@ -28,7 +28,7 @@ services:
         - CMD
         - node
         - -e
-        - fetch('http://127.0.0.1:4180/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))
+        - "fetch('http://127.0.0.1:4180/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
       interval: 30s
       timeout: 5s
       start_period: 10s

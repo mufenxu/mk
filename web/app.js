@@ -19,6 +19,8 @@ const state = {
   remoteTaskDetails: {},
   newTaskSeed: null,
   syncingAccounts: new Set(),
+  taskFormDirty: false,
+  settingsFormDirty: false,
 };
 
 const pageMeta = {
@@ -259,7 +261,10 @@ async function loadData() {
   state.tasks = tasks.tasks;
   state.settings = settings;
   state.logs = logs.logs;
-  if (state.selectedTaskId && !state.tasks.some((task) => task.id === state.selectedTaskId)) state.selectedTaskId = null;
+  if (state.selectedTaskId && !state.tasks.some((task) => task.id === state.selectedTaskId)) {
+    state.selectedTaskId = null;
+    state.taskFormDirty = false;
+  }
   $("#nav-task-count").textContent = state.tasks.length;
   $("#nav-account-count").textContent = state.accounts.length;
   $("#nav-remote-count").textContent = allRemoteTasks().length;
@@ -270,12 +275,12 @@ async function loadData() {
 function renderAll() {
   renderOverview();
   renderTaskList();
-  renderTaskEditor();
+  if (!state.taskFormDirty || !$("#task-form")) renderTaskEditor();
   renderRemoteTasks();
   renderAccounts();
   renderHistoryFilters();
   renderHistory();
-  renderSettings();
+  if (!state.settingsFormDirty) renderSettings();
   if ($("#browser-bridge-dialog")?.open) renderBrowserBridgeDialog();
   icons();
 }
@@ -589,7 +594,7 @@ function defaultTask() {
     keepAwake: true,
     dryRun: true,
     dedupe: true,
-    prompt: "请继续推进 {{task_name}}，并汇报 {{date}} 的最新进展。",
+    prompt: "你好",
     promptVersions: [],
     sessionConfigured: false,
     sessionUpdatedAt: null,
@@ -890,6 +895,7 @@ async function saveTask(event) {
     state.selectedTaskId = response.task.id;
     state.newTask = false;
     state.newTaskSeed = null;
+    state.taskFormDirty = false;
     await loadData();
     toast("任务配置已保存");
   } catch (error) { toast(error.message, "error"); }
@@ -943,10 +949,10 @@ document.addEventListener("click", async (event) => {
 
   const openTask = event.target.closest("[data-open-task]");
   if (openTask) {
-    state.newTask = false; state.selectedTaskId = openTask.dataset.openTask; showPage("tasks"); renderTaskList(); renderTaskEditor(); icons();
+    state.taskFormDirty = false; state.newTask = false; state.selectedTaskId = openTask.dataset.openTask; showPage("tasks"); renderTaskList(); renderTaskEditor(); icons();
   }
   const selectTask = event.target.closest("[data-select-task]");
-  if (selectTask) { state.newTask = false; state.selectedTaskId = selectTask.dataset.selectTask; renderTaskList(); renderTaskEditor(); icons(); }
+  if (selectTask) { state.taskFormDirty = false; state.newTask = false; state.selectedTaskId = selectTask.dataset.selectTask; renderTaskList(); renderTaskEditor(); icons(); }
 
   const alertAccount = event.target.closest("[data-alert-account]");
   if (alertAccount) {
@@ -969,6 +975,7 @@ document.addEventListener("click", async (event) => {
       state.newTaskSeed = { accountId: task.accountId, remoteTaskId: task.id, name: task.name };
       state.newTask = true;
       state.selectedTaskId = null;
+      state.taskFormDirty = false;
       showPage("tasks");
       renderTaskList();
       renderTaskEditor();
@@ -1043,7 +1050,7 @@ document.addEventListener("click", async (event) => {
   }
 
   const taskAction = event.target.closest("[data-task-action]")?.dataset.taskAction;
-  if (taskAction === "cancel") { state.newTask = false; state.newTaskSeed = null; renderTaskList(); renderTaskEditor(); icons(); }
+  if (taskAction === "cancel") { state.taskFormDirty = false; state.newTask = false; state.newTaskSeed = null; renderTaskList(); renderTaskEditor(); icons(); }
   if (["check", "dry-run", "send", "force"].includes(taskAction)) runTask(taskAction);
   if (taskAction === "clone") {
     const task = selectedTask();
@@ -1107,6 +1114,8 @@ document.addEventListener("keydown", (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (event.target.closest?.("#task-form")) state.taskFormDirty = true;
+  if (event.target.closest?.("#remote-settings-form, #operations-settings-form")) state.settingsFormDirty = true;
   if (event.target.id === "prompt-input") {
     const task = selectedTask();
     $("#prompt-count").textContent = `${Array.from(event.target.value).length} 字`;
@@ -1121,6 +1130,8 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  if (event.target.closest?.("#task-form")) state.taskFormDirty = true;
+  if (event.target.closest?.("#remote-settings-form, #operations-settings-form")) state.settingsFormDirty = true;
   if (event.target.name === "scheduleMode") {
     const custom = event.target.value === "custom";
     $("#weekday-field").classList.toggle("muted", !custom);
@@ -1164,9 +1175,9 @@ $("#refresh-button").addEventListener("click", () => loadData().then(() => toast
 $("#primary-action").addEventListener("click", () => {
   if (state.page === "settings") return;
   if (state.page === "accounts") { openAccountDialog(); return; }
-  state.newTaskSeed = null; state.newTask = true; state.selectedTaskId = null; showPage("tasks"); renderTaskList(); renderTaskEditor(); icons();
+  state.taskFormDirty = false; state.newTaskSeed = null; state.newTask = true; state.selectedTaskId = null; showPage("tasks"); renderTaskList(); renderTaskEditor(); icons();
 });
-$("#add-task-icon").addEventListener("click", () => { state.newTaskSeed = null; state.newTask = true; state.selectedTaskId = null; renderTaskList(); renderTaskEditor(); icons(); });
+$("#add-task-icon").addEventListener("click", () => { state.taskFormDirty = false; state.newTaskSeed = null; state.newTask = true; state.selectedTaskId = null; renderTaskList(); renderTaskEditor(); icons(); });
 $("#task-editor").addEventListener("submit", saveTask);
 $("#account-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1239,6 +1250,7 @@ $("#remote-settings-form").addEventListener("submit", async (event) => {
       },
     });
     state.settings.remoteSettings = response.remoteSettings;
+    state.settingsFormDirty = false;
     renderSettings();
     icons();
     toast("远端同步设置已保存");
@@ -1256,6 +1268,7 @@ $("#operations-settings-form").addEventListener("submit", async (event) => {
       body: { operationsSettings: { logRetentionDays: Number(form.get("logRetentionDays")) } },
     });
     state.settings.operationsSettings = response.operationsSettings;
+    state.settingsFormDirty = false;
     renderSettings();
     toast("运行记录设置已保存");
   } catch (error) { toast(error.message, "error"); }
