@@ -90,6 +90,7 @@ export class PanelServer {
     this.browserBridge = options.browserBridge ?? null;
     this.remoteSync = options.remoteSync ?? null;
     this.environmentKeeper = options.environmentKeeper ?? null;
+    this.autoLogin = options.autoLogin ?? null;
     this.sessions = new Map();
     this.loginAttempts = new Map();
     this.server = createServer((request, response) => this.handle(request, response));
@@ -341,7 +342,7 @@ export class PanelServer {
         return;
       }
 
-      const accountMatch = /^\/api\/accounts\/([0-9a-f-]+)(?:\/(check-session|sync-remote))?$/.exec(url.pathname);
+      const accountMatch = /^\/api\/accounts\/([0-9a-f-]+)(?:\/(check-session|sync-remote|renew-session))?$/.exec(url.pathname);
       if (accountMatch) {
         const [, accountId, action] = accountMatch;
         if (!action && request.method === "PUT") {
@@ -386,6 +387,16 @@ export class PanelServer {
         if (action === "sync-remote" && request.method === "POST") {
           if (!this.remoteSync) throw new ConfigError("Remote sync is unavailable");
           json(response, 200, { account: await this.remoteSync.syncAccount(accountId, { trigger: "manual" }) });
+          return;
+        }
+        if (action === "renew-session" && request.method === "POST") {
+          if (!this.autoLogin) throw new ConfigError("Automatic login is unavailable");
+          await this.autoLogin.renewAccount(accountId, { trigger: "manual" });
+          let account = this.store.getAccount(accountId);
+          if (this.remoteSync) {
+            try { account = await this.remoteSync.syncAccount(accountId, { trigger: "auto-login" }); } catch { /* Renewal already succeeded. */ }
+          }
+          json(response, 200, { account });
           return;
         }
       }

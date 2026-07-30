@@ -48,6 +48,13 @@ test("panel auth and task APIs keep the MonkeyCode cookie encrypted", async () =
     taskDetail: async (_accountId, id) => ({ id, name: "Remote task", status: "processing" }),
     configure: () => {},
   };
+  const renewals = [];
+  const autoLogin = {
+    renewAccount: async (id, options) => {
+      renewals.push({ id, options });
+      return store.getAccount(id);
+    },
+  };
   const panel = new PanelServer({
     store,
     notifications,
@@ -57,6 +64,7 @@ test("panel auth and task APIs keep the MonkeyCode cookie encrypted", async () =
     port: 0,
     secureCookie: false,
     remoteSync,
+    autoLogin,
   });
   const address = await panel.listen();
   const baseUrl = `http://127.0.0.1:${address.port}`;
@@ -107,6 +115,13 @@ test("panel auth and task APIs keep the MonkeyCode cookie encrypted", async () =
     assert.equal("session" in accountBody.accounts[0], false);
     assert.equal("sessionEncrypted" in accountBody.accounts[0], false);
 
+    const renewed = await fetch(`${baseUrl}/api/accounts/${createdBody.task.accountId}/renew-session`, {
+      method: "POST",
+      headers: { Cookie: cookie, "X-CSRF-Token": auth.csrf },
+    });
+    assert.equal(renewed.status, 200);
+    assert.deepEqual(renewals, [{ id: createdBody.task.accountId, options: { trigger: "manual" } }]);
+
     const syncRejected = await fetch(`${baseUrl}/api/accounts/${createdBody.task.accountId}/sync-remote`, {
       method: "POST",
       headers: { Cookie: cookie },
@@ -134,7 +149,7 @@ test("panel auth and task APIs keep the MonkeyCode cookie encrypted", async () =
     assert.equal(configOnDisk.includes("private-session-cookie"), false);
     assert.equal(configOnDisk.includes("sessionEncrypted"), true);
     const parsedConfig = JSON.parse(configOnDisk);
-    assert.equal(parsedConfig.version, 8);
+    assert.equal(parsedConfig.version, 9);
     assert.equal(parsedConfig.tasks[0].keepAwake, true);
     assert.deepEqual(parsedConfig.tasks[0].schedule.times, ["09:00"]);
     assert.equal(parsedConfig.tasks[0].completion.enabled, true);
@@ -208,7 +223,7 @@ test("version 2 task credentials migrate to reusable accounts without losing the
     const store = await new DataStore(directory, key).init();
     const publicConfig = store.getPublicConfig();
     const resolvedTask = store.getTask(taskId, { withSession: true });
-    assert.equal(publicConfig.version, 8);
+    assert.equal(publicConfig.version, 9);
     assert.equal(publicConfig.accounts.length, 1);
     assert.equal(publicConfig.accounts[0].sessionConfigured, true);
     assert.equal(publicConfig.tasks[0].accountId, publicConfig.accounts[0].id);
@@ -219,7 +234,7 @@ test("version 2 task credentials migrate to reusable accounts without losing the
     assert.equal(resolvedTask.baseUrl, "https://monkeycode-ai.com");
 
     const current = JSON.parse(await readFile(path.join(directory, "config.json"), "utf8"));
-    assert.equal(current.version, 8);
+    assert.equal(current.version, 9);
     assert.equal("sessionEncrypted" in current.tasks[0], false);
     const backups = await readdir(path.join(directory, "backups"));
     assert.equal(backups.length, 1);
@@ -260,7 +275,7 @@ test("version 3 accounts migrate to browser-bridge configuration without changin
   try {
     const store = await new DataStore(directory, key).init();
     const account = store.getAccount(accountId, { withSession: true });
-    assert.equal(store.getPublicConfig().version, 8);
+    assert.equal(store.getPublicConfig().version, 9);
     assert.equal(account.session, "existing-private-cookie");
     assert.equal(account.sessionSource, "manual");
     assert.equal(account.sessionExpiresAt, null);
@@ -300,7 +315,7 @@ test("version 5 configuration gains persistent remote sync defaults", async () =
       quotaReserveTokens: 0,
     });
     const current = JSON.parse(await readFile(path.join(directory, "config.json"), "utf8"));
-    assert.equal(current.version, 8);
+    assert.equal(current.version, 9);
     assert.deepEqual(current.remoteSettings, store.getPublicConfig().remoteSettings);
     const backups = await readdir(path.join(directory, "backups"));
     assert.equal(backups.length, 1);

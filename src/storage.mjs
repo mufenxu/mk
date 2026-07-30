@@ -149,6 +149,8 @@ function backupDiff(current, target) {
     name: account.name,
     baseUrl: account.baseUrl,
     sessionEncrypted: account.sessionEncrypted ?? null,
+    loginEncrypted: account.loginEncrypted ?? null,
+    autoLoginEnabled: account.autoLoginEnabled ?? false,
   }));
   const tasks = collectionDiff(current.tasks ?? [], target.tasks ?? [], (task) => ({
     name: task.name,
@@ -301,7 +303,7 @@ export class DataStore {
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
       this.config = {
-        version: 8,
+        version: 9,
         enabled: true,
         remoteSettings: cleanRemoteSettings(),
         operationsSettings: cleanOperationsSettings(),
@@ -317,7 +319,7 @@ export class DataStore {
   }
 
   validateEncryptedConfig(config) {
-    if (!config || ![2, 3, 4, 5, 6, 7, 8].includes(config.version) || !Array.isArray(config.tasks) || !Array.isArray(config.notifications)) {
+    if (!config || ![2, 3, 4, 5, 6, 7, 8, 9].includes(config.version) || !Array.isArray(config.tasks) || !Array.isArray(config.notifications)) {
       throw new ConfigError("Unsupported or invalid control panel configuration");
     }
     if (config.version === 2) {
@@ -331,6 +333,7 @@ export class DataStore {
         if (!account.id || accountIds.has(account.id)) throw new ConfigError("Account identifiers are invalid");
         accountIds.add(account.id);
         if (account.sessionEncrypted) decryptJson(account.sessionEncrypted, this.masterKey);
+        if (account.loginEncrypted) decryptJson(account.loginEncrypted, this.masterKey);
       }
       for (const task of config.tasks) {
         if (task.accountId && !accountIds.has(task.accountId)) throw new ConfigError("Task references an unknown account");
@@ -458,13 +461,32 @@ export class DataStore {
     };
   }
 
+  migrateV8(config) {
+    return {
+      ...config,
+      version: 9,
+      accounts: config.accounts.map((account) => ({
+        ...account,
+        loginEncrypted: null,
+        autoLoginEnabled: false,
+        lastAutoLoginAttemptAt: null,
+        lastAutoLoginAt: null,
+        lastAutoLoginStatus: "never",
+        lastAutoLoginError: null,
+        autoLoginFailureCount: 0,
+        autoLoginNextAttemptAt: null,
+      })),
+    };
+  }
+
   migrateConfig(config) {
-    if (config.version === 2) return this.migrateV7(this.migrateV6(this.migrateV5(this.migrateV4(this.migrateV3(this.migrateV2(config))))));
-    if (config.version === 3) return this.migrateV7(this.migrateV6(this.migrateV5(this.migrateV4(this.migrateV3(config)))));
-    if (config.version === 4) return this.migrateV7(this.migrateV6(this.migrateV5(this.migrateV4(config))));
-    if (config.version === 5) return this.migrateV7(this.migrateV6(this.migrateV5(config)));
-    if (config.version === 6) return this.migrateV7(this.migrateV6(config));
-    if (config.version === 7) return this.migrateV7(config);
+    if (config.version === 2) return this.migrateV8(this.migrateV7(this.migrateV6(this.migrateV5(this.migrateV4(this.migrateV3(this.migrateV2(config)))))));
+    if (config.version === 3) return this.migrateV8(this.migrateV7(this.migrateV6(this.migrateV5(this.migrateV4(this.migrateV3(config))))));
+    if (config.version === 4) return this.migrateV8(this.migrateV7(this.migrateV6(this.migrateV5(this.migrateV4(config)))));
+    if (config.version === 5) return this.migrateV8(this.migrateV7(this.migrateV6(this.migrateV5(config))));
+    if (config.version === 6) return this.migrateV8(this.migrateV7(this.migrateV6(config)));
+    if (config.version === 7) return this.migrateV8(this.migrateV7(config));
+    if (config.version === 8) return this.migrateV8(config);
     return config;
   }
 
@@ -476,10 +498,11 @@ export class DataStore {
   }
 
   publicAccount(account) {
-    const { sessionEncrypted: _session, ...safe } = account;
+    const { sessionEncrypted: _session, loginEncrypted: _login, ...safe } = account;
     return {
       ...safe,
       sessionConfigured: Boolean(account.sessionEncrypted),
+      loginConfigured: Boolean(account.loginEncrypted),
       credentialStatus: accountCredentialStatus(account),
       taskCount: this.config.tasks.filter((task) => task.accountId === account.id).length,
       bridges: this.config.browserBridges
@@ -517,14 +540,14 @@ export class DataStore {
     };
   }
 
-  getAccount(id, { withSession = false } = {}) {
+  getAccount(id, { withSession = false, withLogin = false } = {}) {
     const account = this.config.accounts.find((entry) => entry.id === id);
     if (!account) return null;
-    if (!withSession) return this.publicAccount(account);
-    return {
-      ...account,
-      session: account.sessionEncrypted ? decryptJson(account.sessionEncrypted, this.masterKey).session : "",
-    };
+    if (!withSession && !withLogin) return this.publicAccount(account);
+    const result = { ...account };
+    if (withSession) result.session = account.sessionEncrypted ? decryptJson(account.sessionEncrypted, this.masterKey).session : "";
+    if (withLogin) result.login = account.loginEncrypted ? decryptJson(account.loginEncrypted, this.masterKey) : null;
+    return result;
   }
 
   async upsertAccount(input, id) {
@@ -543,7 +566,45 @@ export class DataStore {
     let remoteSyncError = existing?.remoteSyncError ?? null;
     let remoteSyncAttemptedAt = existing?.remoteSyncAttemptedAt ?? null;
     let remoteSyncedAt = existing?.remoteSyncedAt ?? null;
+    let loginEncrypted = existing?.loginEncrypted ?? null;
+    let autoLoginEnabled = existing?.autoLoginEnabled ?? false;
+    let lastAutoLoginAttemptAt = existing?.lastAutoLoginAttemptAt ?? null;
+    let lastAutoLoginAt = existing?.lastAutoLoginAt ?? null;
+    let lastAutoLoginStatus = existing?.lastAutoLoginStatus ?? "never";
+    let lastAutoLoginError = existing?.lastAutoLoginError ?? null;
+    let autoLoginFailureCount = existing?.autoLoginFailureCount ?? 0;
+    let autoLoginNextAttemptAt = existing?.autoLoginNextAttemptAt ?? null;
     let credentialChanged = baseUrl !== existing?.baseUrl;
+
+    const loginEmail = typeof input.loginEmail === "string" ? input.loginEmail.trim() : "";
+    const loginPassword = typeof input.loginPassword === "string" ? input.loginPassword.trim() : "";
+    if (Boolean(loginEmail) !== Boolean(loginPassword)) {
+      throw new ConfigError("Login account and password must be provided together");
+    }
+    if (input.clearLogin === true) {
+      loginEncrypted = null;
+      autoLoginEnabled = false;
+      lastAutoLoginAttemptAt = null;
+      lastAutoLoginAt = null;
+      lastAutoLoginStatus = "never";
+      lastAutoLoginError = null;
+      autoLoginFailureCount = 0;
+      autoLoginNextAttemptAt = null;
+    } else if (loginEmail && loginPassword) {
+      const email = cleanText(loginEmail, "Login account", 254);
+      const password = cleanText(loginPassword, "Login password", 1024);
+      loginEncrypted = encryptJson({ email, password }, this.masterKey);
+      lastAutoLoginAttemptAt = null;
+      lastAutoLoginAt = null;
+      lastAutoLoginStatus = "never";
+      lastAutoLoginError = null;
+      autoLoginFailureCount = 0;
+      autoLoginNextAttemptAt = null;
+    }
+    if (input.autoLoginEnabled !== undefined && input.clearLogin !== true) {
+      autoLoginEnabled = cleanBoolean(input.autoLoginEnabled, autoLoginEnabled);
+    }
+    if (autoLoginEnabled && !loginEncrypted) throw new ConfigError("Automatic login requires a login account and password");
 
     if (input.clearSession === true) {
       credentialChanged = Boolean(sessionEncrypted) || credentialChanged;
@@ -571,6 +632,10 @@ export class DataStore {
       remoteSyncAttemptedAt = null;
       remoteSyncedAt = null;
       credentialChanged = true;
+      lastAutoLoginStatus = "never";
+      lastAutoLoginError = null;
+      autoLoginFailureCount = 0;
+      autoLoginNextAttemptAt = null;
     }
 
     const account = {
@@ -587,6 +652,14 @@ export class DataStore {
       remoteSyncError,
       remoteSyncAttemptedAt,
       remoteSyncedAt,
+      loginEncrypted,
+      autoLoginEnabled,
+      lastAutoLoginAttemptAt,
+      lastAutoLoginAt,
+      lastAutoLoginStatus,
+      lastAutoLoginError,
+      autoLoginFailureCount,
+      autoLoginNextAttemptAt,
       lastValidatedAt: credentialChanged ? null : existing?.lastValidatedAt ?? null,
       lastValidationStatus: credentialChanged ? "unknown" : existing?.lastValidationStatus ?? "unknown",
       userId: credentialChanged ? null : existing?.userId ?? null,
@@ -597,6 +670,49 @@ export class DataStore {
     if (existingIndex >= 0) this.config.accounts[existingIndex] = account;
     else this.config.accounts.push(account);
     await this.writeConfig();
+    return this.publicAccount(account);
+  }
+
+  async recordAutoLoginSuccess(id, input) {
+    const account = this.config.accounts.find((entry) => entry.id === id);
+    if (!account) throw new ConfigError("Account not found");
+    if (!COOKIE.test(input.session ?? "")) throw new ConfigError("Session cookie contains invalid characters");
+    const userId = input.user?.id ? String(input.user.id) : "";
+    if (!userId) throw new ConfigError("MonkeyCode user identity is missing");
+    if (account.userId && account.userId !== userId) throw new ConfigError("MonkeyCode account does not match the configured account");
+    const now = (input.now ?? new Date()).toISOString();
+    account.sessionEncrypted = encryptJson({ session: input.session }, this.masterKey);
+    account.sessionUpdatedAt = now;
+    account.sessionExpiresAt = input.expiresAt ?? null;
+    account.sessionSource = "password-login";
+    account.lastValidatedAt = now;
+    account.lastValidationStatus = "valid";
+    account.userId = userId;
+    account.userName = input.user?.name ?? input.user?.nickname ?? account.userName ?? null;
+    account.lastAutoLoginAttemptAt = now;
+    account.lastAutoLoginAt = now;
+    account.lastAutoLoginStatus = "valid";
+    account.lastAutoLoginError = null;
+    account.autoLoginFailureCount = 0;
+    account.autoLoginNextAttemptAt = null;
+    account.updatedAt = now;
+    await this.writeConfig();
+    return this.publicAccount(account);
+  }
+
+  async recordAutoLoginFailure(id, error, now = new Date(), delays = [900_000]) {
+    const account = this.config.accounts.find((entry) => entry.id === id);
+    if (!account) throw new ConfigError("Account not found");
+    const attemptedAt = now.toISOString();
+    const failureCount = (account.autoLoginFailureCount ?? 0) + 1;
+    const delay = delays[Math.min(failureCount - 1, delays.length - 1)];
+    account.lastAutoLoginAttemptAt = attemptedAt;
+    account.lastAutoLoginStatus = "failed";
+    account.lastAutoLoginError = String(error || "Automatic login failed").slice(0, 200);
+    account.autoLoginFailureCount = failureCount;
+    account.autoLoginNextAttemptAt = new Date(now.getTime() + delay).toISOString();
+    account.updatedAt = attemptedAt;
+    await this.writeConfig(false);
     return this.publicAccount(account);
   }
 
@@ -736,6 +852,10 @@ export class DataStore {
     account.lastValidationStatus = "valid";
     account.userId = userId;
     account.userName = input.user?.name ?? input.user?.nickname ?? null;
+    account.lastAutoLoginStatus = account.lastAutoLoginAt ? "valid" : "never";
+    account.lastAutoLoginError = null;
+    account.autoLoginFailureCount = 0;
+    account.autoLoginNextAttemptAt = null;
     account.updatedAt = now;
     bridge.lastStatus = "valid";
     bridge.lastError = null;

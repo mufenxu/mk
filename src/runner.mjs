@@ -77,6 +77,7 @@ export class TaskRunner {
     this.intervalMs = options.intervalMs ?? 30_000;
     this.runOnce = options.runOnce ?? runOnce;
     this.remoteTaskDetail = options.remoteTaskDetail ?? getRemoteTaskDetail;
+    this.autoLogin = options.autoLogin ?? null;
     this.wait = options.wait ?? wait;
     this.now = options.now ?? (() => Date.now());
     this.taskHealth = new Map();
@@ -348,7 +349,7 @@ export class TaskRunner {
 
   async execute(id, options = {}) {
     const startedAt = Date.now();
-    const task = this.store.getTask(id, { withSession: true });
+    let task = this.store.getTask(id, { withSession: true });
     if (!task) throw new ConfigError("Task not found");
     const trigger = options.trigger ?? "manual";
     const mode = options.mode ?? "send";
@@ -363,6 +364,16 @@ export class TaskRunner {
     let attempt = 0;
     let baseline = null;
     const runId = options.runId ?? `${task.id}:${startedAt}`;
+
+    if (this.autoLogin && task.accountId) {
+      const account = this.store.getAccount(task.accountId);
+      try {
+        const renewal = await this.autoLogin.renewIfNeeded(account, { now, trigger: "task-run" });
+        if (renewal.renewed) task = this.store.getTask(id, { withSession: true });
+      } catch {
+        // The task can still use a not-yet-expired cookie; renewal failure is logged separately.
+      }
+    }
 
     if (signal?.aborted) finalError = new CancelledError();
     else if (!task.session) finalError = new AuthExpiredError("Session cookie is not configured");
@@ -529,8 +540,12 @@ export class TaskRunner {
         const expiry = sessionExpiry(account, now);
         event = expiry.expired ? "auth-expired" : expiry.daysRemaining <= 3 ? "session-warning" : null;
         detail = expiry.expired
-          ? "Cookie has expired; sign in to MonkeyCode again to resume this account"
-          : `Cookie expires in ${expiry.daysRemaining} day(s); sign in again before it expires`;
+          ? account.autoLoginEnabled
+            ? "Cookie has expired; automatic login will retry according to its backoff schedule"
+            : "Cookie has expired; sign in to MonkeyCode again to resume this account"
+          : account.autoLoginEnabled
+            ? `Cookie expires in ${expiry.daysRemaining} day(s); automatic renewal is enabled`
+            : `Cookie expires in ${expiry.daysRemaining} day(s); sign in again before it expires`;
         marker = `${account.sessionUpdatedAt ?? "unknown"}:${account.sessionExpiresAt}:${event}`;
       } else {
         const credentialAge = sessionAgeDays(account, now);

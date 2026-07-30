@@ -188,6 +188,12 @@
         </div>
         <label class="field"><span>monkeycode_ai_session</span><span class="password-wrap"><input id="account-session-input" name="session" type="password" autocomplete="off"><button class="icon-button password-toggle" type="button" data-toggle-password="account-session-input" title="显示 Cookie" aria-label="显示 Cookie"><i data-lucide="eye"></i></button></span><small id="account-session-hint" class="field-hint">填写 Cookie 的 Value，保存时会加密。</small></label>
         <label id="clear-account-session-row" class="check-row" hidden><input name="clearSession" type="checkbox"><span>清除当前 Cookie</span></label>
+        <div class="form-grid">
+          <label class="field"><span>登录邮箱 / 账号</span><input name="loginEmail" maxlength="254" autocomplete="off"><small id="account-login-hint" class="field-hint">与密码同时填写，保存后由服务器自动登录。</small></label>
+          <label class="field"><span>登录密码</span><span class="password-wrap"><input id="account-login-password" name="loginPassword" type="password" maxlength="1024" autocomplete="new-password"><button class="icon-button password-toggle" type="button" data-toggle-password="account-login-password" title="显示密码" aria-label="显示密码"><i data-lucide="eye"></i></button></span></label>
+        </div>
+        <label class="check-row"><input name="autoLoginEnabled" type="checkbox"><span>Cookie 到期前由服务器自动登录续期</span></label>
+        <label id="clear-account-login-row" class="check-row" hidden><input name="clearLogin" type="checkbox"><span>清除已保存的登录账号和密码</span></label>
       </div>
       <div class="dialog-footer"><button class="button secondary" type="button" data-close-dialog="account-dialog">取消</button><button class="button primary" type="submit"><i data-lucide="save"></i><span>保存账号</span></button></div>
     </form>

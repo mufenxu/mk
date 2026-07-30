@@ -2,6 +2,7 @@
 
 import path from "node:path";
 
+import { AutoLoginService } from "./auto-login.mjs";
 import { BrowserBridgeService } from "./browser-bridge.mjs";
 import { EnvironmentKeeper } from "./environment-keeper.mjs";
 import { ConfigError } from "./errors.mjs";
@@ -34,19 +35,22 @@ try {
   const config = panelConfig();
   const store = await new DataStore(config.dataDir, config.masterKey).init();
   const notifications = new NotificationService(store);
-  const runner = new TaskRunner(store, notifications);
+  const autoLogin = new AutoLoginService(store, notifications);
+  const runner = new TaskRunner(store, notifications, { autoLogin });
   const environmentKeeper = new EnvironmentKeeper(store);
   const remoteSync = new RemoteSyncService(store, notifications);
   const browserBridge = config.browserBridgeEnabled ? new BrowserBridgeService(store) : null;
-  const server = new PanelServer({ ...config, store, notifications, runner, browserBridge, remoteSync, environmentKeeper });
+  const server = new PanelServer({ ...config, store, notifications, runner, browserBridge, remoteSync, environmentKeeper, autoLogin });
   await environmentKeeper.start();
   const address = await server.listen();
+  autoLogin.start();
   runner.startScheduler();
   remoteSync.start();
   console.log(`MonkeyCode control panel listening on http://${address.address}:${address.port}`);
 
   const shutdown = async () => {
     runner.stopScheduler();
+    autoLogin.stop();
     remoteSync.stop();
     environmentKeeper.stop();
     await server.close();

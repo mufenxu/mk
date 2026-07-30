@@ -20,6 +20,7 @@ const state = {
   remoteTaskDetails: {},
   newTaskSeed: null,
   syncingAccounts: new Set(),
+  renewingAccounts: new Set(),
   taskFormDirty: false,
   settingsFormDirty: false,
 };
@@ -359,9 +360,15 @@ function credentialBadgeSpec(status) {
 }
 
 function credentialDetail(account) {
-  if (account.sessionExpiresAt) return `到期 ${formatDate(account.sessionExpiresAt, true)}`;
-  if (account.lastValidatedAt) return `验证于 ${formatDate(account.lastValidatedAt)}`;
-  return "尚未验证";
+  const session = account.sessionExpiresAt
+    ? `到期 ${formatDate(account.sessionExpiresAt, true)}`
+    : account.lastValidatedAt
+      ? `验证于 ${formatDate(account.lastValidatedAt)}`
+      : "尚未验证";
+  if (!account.loginConfigured) return session;
+  if (!account.autoLoginEnabled) return `${session} · 自动续期已关闭`;
+  if (account.lastAutoLoginStatus === "failed") return `${session} · 自动续期失败`;
+  return `${session} · 自动续期已开启`;
 }
 
 function bridgeBadge(bridge) {
@@ -391,7 +398,7 @@ function renderAccounts() {
     const syncClass = account.remoteSyncStatus === "synced" ? "valid" : account.remoteSyncStatus === "error" ? "invalid" : "unknown";
     const syncLabel = account.remoteSyncStatus === "synced" ? "已同步" : account.remoteSyncStatus === "error" ? "同步失败" : "待同步";
     const initial = Array.from(profile?.name || account.userName || account.name || "M")[0];
-    return `<tr><td><div class="account-name"><span class="account-avatar account-initial">${escapeHtml(initial)}</span><div><strong>${escapeHtml(account.name)}</strong><span>${escapeHtml(profile?.name || account.userName || accountHost(account.baseUrl))}${profile?.role ? ` · ${escapeHtml(profile.role)}` : ""}</span></div></div></td><td>${accountBadge(account)}<div class="muted validation-time">${escapeHtml(credentialDetail(account))}</div></td><td><strong>${escapeHtml(snapshot?.subscription?.plan ? String(snapshot.subscription.plan).toUpperCase() : "—")}</strong><div class="quota-line"><span>${formatNumber(remaining)} / ${formatNumber(limit)}</span>${quotaPercent === null ? "" : `<span>${quotaPercent.toFixed(0)}%</span>`}</div><div class="quota-track"><span style="width:${quotaPercent ?? 0}%"></span></div></td><td><strong>${snapshot?.tasks?.length ?? 0}</strong><div class="muted validation-time">${snapshot ? `${snapshot.tasks.filter((task) => ["processing", "pending"].includes(task.status)).length} 个活跃` : "尚未读取"}</div></td><td><span class="badge ${syncClass}">${syncLabel}</span><div class="muted validation-time" title="${escapeHtml(account.remoteSyncError || "")}">${account.remoteSyncedAt ? relativeTime(account.remoteSyncedAt) : account.remoteSyncError ? escapeHtml(account.remoteSyncError) : "尚未同步"}</div></td><td><strong>${account.taskCount}</strong> 个任务<div class="muted validation-time">${account.bridges?.length ?? 0} 个浏览器</div></td><td><div class="row-actions"><button class="icon-button ${state.syncingAccounts.has(account.id) ? "is-spinning" : ""}" type="button" data-account-sync="${account.id}" ${account.sessionConfigured && !state.syncingAccounts.has(account.id) ? "" : "disabled"} title="同步账号与远端任务" aria-label="同步账号与远端任务"><i data-lucide="cloud-download"></i></button>${state.settings?.browserBridgeEnabled ? `<button class="icon-button" type="button" data-account-bridge="${account.id}" title="浏览器同步" aria-label="浏览器同步"><i data-lucide="plug-zap"></i></button>` : ""}<button class="icon-button" type="button" data-account-check="${account.id}" ${account.sessionConfigured ? "" : "disabled"} title="验证 Cookie" aria-label="验证 Cookie"><i data-lucide="shield-check"></i></button><button class="icon-button" type="button" data-account-edit="${account.id}" title="编辑账号" aria-label="编辑账号"><i data-lucide="pencil"></i></button><button class="icon-button" type="button" data-account-delete="${account.id}" title="删除账号" aria-label="删除账号"><i data-lucide="trash-2"></i></button></div></td></tr>`;
+    return `<tr><td><div class="account-name"><span class="account-avatar account-initial">${escapeHtml(initial)}</span><div><strong>${escapeHtml(account.name)}</strong><span>${escapeHtml(profile?.name || account.userName || accountHost(account.baseUrl))}${profile?.role ? ` · ${escapeHtml(profile.role)}` : ""}</span></div></div></td><td>${accountBadge(account)}<div class="muted validation-time" title="${escapeHtml(account.lastAutoLoginError || "")}">${escapeHtml(credentialDetail(account))}</div></td><td><strong>${escapeHtml(snapshot?.subscription?.plan ? String(snapshot.subscription.plan).toUpperCase() : "—")}</strong><div class="quota-line"><span>${formatNumber(remaining)} / ${formatNumber(limit)}</span>${quotaPercent === null ? "" : `<span>${quotaPercent.toFixed(0)}%</span>`}</div><div class="quota-track"><span style="width:${quotaPercent ?? 0}%"></span></div></td><td><strong>${snapshot?.tasks?.length ?? 0}</strong><div class="muted validation-time">${snapshot ? `${snapshot.tasks.filter((task) => ["processing", "pending"].includes(task.status)).length} 个活跃` : "尚未读取"}</div></td><td><span class="badge ${syncClass}">${syncLabel}</span><div class="muted validation-time" title="${escapeHtml(account.remoteSyncError || "")}">${account.remoteSyncedAt ? relativeTime(account.remoteSyncedAt) : account.remoteSyncError ? escapeHtml(account.remoteSyncError) : "尚未同步"}</div></td><td><strong>${account.taskCount}</strong> 个任务<div class="muted validation-time">${account.bridges?.length ?? 0} 个浏览器</div></td><td><div class="row-actions"><button class="icon-button ${state.syncingAccounts.has(account.id) ? "is-spinning" : ""}" type="button" data-account-sync="${account.id}" ${account.sessionConfigured && !state.syncingAccounts.has(account.id) ? "" : "disabled"} title="同步账号与远端任务" aria-label="同步账号与远端任务"><i data-lucide="cloud-download"></i></button><button class="icon-button ${state.renewingAccounts.has(account.id) ? "is-spinning" : ""}" type="button" data-account-renew="${account.id}" ${account.loginConfigured && !state.renewingAccounts.has(account.id) ? "" : "disabled"} title="立即自动登录续期" aria-label="立即自动登录续期"><i data-lucide="refresh-cw"></i></button>${state.settings?.browserBridgeEnabled ? `<button class="icon-button" type="button" data-account-bridge="${account.id}" title="浏览器同步" aria-label="浏览器同步"><i data-lucide="plug-zap"></i></button>` : ""}<button class="icon-button" type="button" data-account-check="${account.id}" ${account.sessionConfigured ? "" : "disabled"} title="验证 Cookie" aria-label="验证 Cookie"><i data-lucide="shield-check"></i></button><button class="icon-button" type="button" data-account-edit="${account.id}" title="编辑账号" aria-label="编辑账号"><i data-lucide="pencil"></i></button><button class="icon-button" type="button" data-account-delete="${account.id}" title="删除账号" aria-label="删除账号"><i data-lucide="trash-2"></i></button></div></td></tr>`;
   }).join("")}</tbody></table>`;
 }
 
@@ -496,6 +503,27 @@ async function syncRemoteAccount(accountId, { preserveTaskForm = false } = {}) {
   }
 }
 
+async function renewAccountSession(accountId) {
+  if (!accountId || state.renewingAccounts.has(accountId)) return null;
+  state.renewingAccounts.add(accountId);
+  renderAccounts();
+  icons();
+  try {
+    const response = await api(`/api/accounts/${accountId}/renew-session`, { method: "POST" });
+    await loadData();
+    toast("自动登录成功，Cookie 已续期");
+    return response.account;
+  } catch (error) {
+    toast(error.message, "error");
+    await loadData().catch(() => {});
+    return null;
+  } finally {
+    state.renewingAccounts.delete(accountId);
+    renderAccounts();
+    icons();
+  }
+}
+
 async function refreshRemoteDetail() {
   const task = selectedRemoteTask();
   if (!task) return;
@@ -557,10 +585,19 @@ function openAccountDialog(id = null, options = {}) {
   form.elements.baseUrl.value = account?.baseUrl ?? "https://monkeycode-ai.com";
   form.elements.session.value = "";
   form.elements.session.placeholder = account?.sessionConfigured ? "留空表示保持现有 Cookie" : "填写 Cookie 的 Value";
+  form.elements.loginEmail.value = "";
+  form.elements.loginPassword.value = "";
+  form.elements.loginEmail.placeholder = account?.loginConfigured ? "留空表示保持已保存的登录账号" : "填写 MonkeyCode 登录账号";
+  form.elements.loginPassword.placeholder = account?.loginConfigured ? "留空表示保持已保存的登录密码" : "填写 MonkeyCode 登录密码";
+  form.elements.autoLoginEnabled.checked = account?.autoLoginEnabled ?? false;
   $("#account-session-hint").textContent = account?.sessionConfigured
     ? `当前 Cookie 更新于 ${formatDate(account.sessionUpdatedAt)}，留空不会覆盖。`
     : "填写 Cookie 的 Value，保存时会加密。";
   $("#clear-account-session-row").hidden = !account?.sessionConfigured;
+  $("#account-login-hint").textContent = account?.loginConfigured
+    ? "登录凭据已加密保存；账号和密码必须同时留空或同时重新填写。"
+    : "与密码同时填写，保存后由服务器自动登录。";
+  $("#clear-account-login-row").hidden = !account?.loginConfigured;
   $("#account-dialog").showModal();
   setTimeout(() => form.elements.name.focus(), 0);
   icons();
@@ -573,6 +610,10 @@ function collectAccountForm() {
     baseUrl: data.get("baseUrl"),
     session: data.get("session"),
     clearSession: data.get("clearSession") === "on",
+    loginEmail: data.get("loginEmail"),
+    loginPassword: data.get("loginPassword"),
+    autoLoginEnabled: data.get("autoLoginEnabled") === "on",
+    clearLogin: data.get("clearLogin") === "on",
   };
 }
 
@@ -1045,6 +1086,8 @@ document.addEventListener("click", async (event) => {
   if (bridgeAccount) openBrowserBridgeDialog(bridgeAccount.dataset.accountBridge);
   const syncAccount = event.target.closest("[data-account-sync]");
   if (syncAccount) syncRemoteAccount(syncAccount.dataset.accountSync);
+  const renewAccount = event.target.closest("[data-account-renew]");
+  if (renewAccount) renewAccountSession(renewAccount.dataset.accountRenew);
   if (event.target.closest("[data-task-sync-remote]")) {
     const accountId = $("#task-form")?.elements.accountId?.value;
     if (accountId) syncRemoteAccount(accountId, { preserveTaskForm: true });
@@ -1080,7 +1123,7 @@ document.addEventListener("click", async (event) => {
     const account = state.accounts.find((item) => item.id === deleteAccount.dataset.accountDelete);
     const message = account?.taskCount
       ? `“${account.name}”仍关联 ${account.taskCount} 个任务，请先修改这些任务的账号。`
-      : `确定删除“${account?.name ?? "该账号"}”吗？已保存的 Cookie 会一并删除。`;
+      : `确定删除“${account?.name ?? "该账号"}”吗？已保存的 Cookie 和登录凭据会一并删除。`;
     if (await confirmAction(account?.taskCount ? "账号仍在使用" : "删除账号", message, account?.taskCount ? "知道了" : "删除")) {
       if (!account?.taskCount) {
         try { await api(`/api/accounts/${account.id}`, { method: "DELETE" }); await loadData(); toast("账号已删除"); } catch (error) { toast(error.message, "error"); }
@@ -1282,7 +1325,8 @@ $("#account-form").addEventListener("submit", async (event) => {
     }
     state.accountDialogReturnToTask = false;
     toast("账号已保存");
-    if (response.account.sessionConfigured) syncRemoteAccount(response.account.id, { preserveTaskForm: true });
+    if (response.account.autoLoginEnabled && ["missing", "expired", "invalid"].includes(response.account.credentialStatus)) renewAccountSession(response.account.id);
+    else if (response.account.sessionConfigured) syncRemoteAccount(response.account.id, { preserveTaskForm: true });
   } catch (error) { toast(error.message, "error"); }
 });
 $("#remote-account-filter").addEventListener("change", () => { state.selectedRemoteKey = null; renderRemoteTasks(); icons(); });
