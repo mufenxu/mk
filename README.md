@@ -164,15 +164,16 @@ npm run send
 
 ## Docker 与 GitHub Actions
 
-项目镜像只在 GitHub Actions 中构建，并发布到阿里云 ACR：
+面板和 Node Pool 控制器镜像只在 GitHub Actions 中构建，并发布到阿里云 ACR：
 
 ```text
 crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/my
+crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/monkeycode-node-pool
 ```
 
-推送 `main` 后发布 `latest` 和 `sha-<提交号>`；推送 `v*` 标签后额外发布去掉 `v` 前缀的版本标签。Pull Request 只执行测试、构建和容器健康检查，不推送镜像。仓库需要配置 GitHub Actions Secret `ALIYUN_ACR_PASSWORD`，值为阿里云容器镜像服务个人版的固定登录密码；登录用户名和镜像地址已经固定在工作流中。密码不会写入代码、日志或镜像。
+推送 `main` 后，两个镜像都会发布 `latest` 和 `sha-<提交号>`；推送 `v*` 标签后额外发布去掉 `v` 前缀的版本标签。Pull Request 只执行检查、构建和两个容器的健康检查，不推送镜像。仓库需要配置 GitHub Actions Secret `ALIYUN_ACR_PASSWORD`，值为阿里云容器镜像服务个人版的固定登录密码；登录用户名和镜像地址已经固定在工作流中。密码不会写入代码、日志或镜像。
 
-VPS 创建 `/etc/monkeycode-panel.env`：
+VPS 在 `compose.yaml` 同目录创建面板使用的 `.env`：
 
 ```dotenv
 MONKEYCODE_PANEL_PASSWORD=填写至少12位的管理密码
@@ -181,7 +182,14 @@ MONKEYCODE_SECURE_COOKIE=true
 MONKEYCODE_BROWSER_BRIDGE_ENABLED=true
 ```
 
-容器内监听地址、端口和数据目录由 `compose.yaml` 固定为 `0.0.0.0:4180` 和 `/data`。宿主机只监听 `127.0.0.1:4180`，继续由 Nginx 提供公网 HTTPS。
+Node Pool 使用独立的 `.env.node-pool`，避免控制器密钥进入面板容器。已有 Worker 时必须沿用原控制器密钥，不能重新生成：
+
+```dotenv
+MK_ADMIN_TOKEN=沿用现有管理令牌
+MK_WORKER_SECRET=沿用现有Worker密钥
+```
+
+面板和控制器在容器内分别监听 `4180`、`4190`，宿主机只监听 `127.0.0.1`，继续由各自的 Nginx HTTPS 域名代理。Node Pool 镜像已内置受保护的 Worker 下载包，VPS 不需要构建镜像或生成 `dist`。
 
 首次部署或更新：
 
@@ -190,9 +198,10 @@ docker compose pull
 docker compose up -d
 docker compose ps
 docker compose logs --tail=200 monkeycode-panel
+docker compose logs --tail=200 node-pool-controller
 ```
 
-如果阿里云仓库要求登录拉取，请在 VPS 使用相同的 ACR 用户名和固定密码执行 `docker login`。`docker compose down` 不删除命名卷，不能使用 `docker compose down -v`，否则会删除面板数据。
+从旧 systemd 或独立 Compose 控制器迁移时，先保留原密钥和 `state.json`，再导入新的 `node-pool-data` 命名卷。不要用空状态直接覆盖现有控制器。如果阿里云仓库要求登录拉取，请在 VPS 使用相同的 ACR 用户名和固定密码执行 `docker login`。`docker compose down` 不删除命名卷，不能使用 `docker compose down -v`，否则会删除面板和 Node Pool 数据。
 
 ## 测试
 

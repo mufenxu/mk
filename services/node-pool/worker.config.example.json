@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "nodeId": "monkey-env-01",
+  "controllerUrl": "https://control.example.com",
+  "rootDir": "/workspace/.worker",
+  "capacity": {
+    "cpu": 1.5,
+    "memoryMb": 6144,
+    "diskMb": 12288
+  },
+  "labels": ["node", "python", "go"],
+  "pollIntervalSeconds": 5,
+  "heartbeatIntervalSeconds": 15,
+  "projects": {
+    "example-api": {
+      "repo": "git@github.com:example/example-api.git",
+      "directory": "example-api",
+      "install": "npm ci",
+      "build": "npm run build",
+      "start": "npm start",
+      "port": 3000,
+      "healthPath": "/healthz",
+      "resources": {
+        "cpu": 0.5,
+        "memoryMb": 512
+      }
+    }
+  }
+}

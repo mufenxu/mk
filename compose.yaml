@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     init: true
     env_file:
-      - .env
+      - ${MONKEYCODE_PANEL_ENV_FILE:-.env}
     environment:
       MONKEYCODE_PANEL_HOST: 0.0.0.0
       MONKEYCODE_PANEL_PORT: "4180"
@@ -39,5 +39,48 @@ services:
         max-size: 10m
         max-file: "3"
 
+  node-pool-controller:
+    image: crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/monkeycode-node-pool:${MONKEYCODE_NODE_POOL_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ${MONKEYCODE_NODE_POOL_ENV_FILE:-.env.node-pool}
+    environment:
+      MK_CONTROLLER_HOST: 0.0.0.0
+      MK_CONTROLLER_PORT: "4190"
+      MK_STATE_FILE: /data/state.json
+      MK_WORKER_BUNDLE_FILE: /dist/monkeycode-node-pool.tar.gz
+    ports:
+      - "127.0.0.1:4190:4190"
+    volumes:
+      - node-pool-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4190/healthz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
 volumes:
   monkeycode-data:
+  node-pool-data:

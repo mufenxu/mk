@@ -1,0 +1,9 @@
+.env*
+.git
+.worker
+data
+dist
+node_modules
+worker.config.json
+*.log
+

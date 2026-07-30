@@ -2,6 +2,7 @@ node_modules/
 data/
 .env
 .env.panel
+.env.node-pool
 extension/*.zip
 .monkeycode-daily-state.json
 *.log
