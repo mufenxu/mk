@@ -103,10 +103,10 @@ td { height: 60px; padding: 9px 16px; border-top: 1px solid var(--border); verti
 tbody tr { transition: background .12s ease; }
 tbody tr:hover { background: var(--surface-hover); }
 .task-name { display: flex; align-items: center; gap: 10px; min-width: 190px; }
-.task-name-icon { width: 32px; height: 32px; border-radius: 7px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; }
+.task-name-icon { width: 32px; height: 32px; border-radius: 7px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex: none; }
 .task-name-icon svg { width: 15px; height: 15px; }
 .task-name strong { display: block; font-size: 13px; }
-.task-name span { display: block; margin-top: 3px; color: var(--text-soft); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.task-name > div > span { display: block; margin-top: 3px; color: var(--text-soft); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .badge { min-height: 23px; padding: 3px 8px; border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 680; white-space: nowrap; }
 .badge.sent, .badge.completed, .badge.valid, .badge.enabled, .badge.connected { color: var(--green); background: var(--green-soft); }
 .badge.failed, .badge.auth-expired, .badge.completion-timeout, .badge.auto-paused, .badge.invalid, .badge.expired { color: var(--red); background: var(--red-soft); }
