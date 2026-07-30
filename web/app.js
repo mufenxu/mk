@@ -93,7 +93,9 @@ const notificationEventLabels = {
   "auto-paused": "连续失败暂停",
   failed: "发送失败",
   "auth-expired": "登录失效",
-  "session-warning": "凭证到期",
+  "session-warning": "凭证即将到期",
+  "auto-login-failed": "自动续期失败",
+  "auto-login-recovered": "自动续期已恢复",
   duplicate: "重复跳过",
   "quota-low": "额度不足",
   "remote-task-error": "远端异常",
@@ -887,7 +889,7 @@ function openNotificationDialog(id = null) {
   state.selectedNotificationId = channel?.id ?? null;
   $("#notification-dialog-title").textContent = channel ? "编辑通知渠道" : "添加通知渠道";
   const type = channel?.type ?? "generic";
-  const defaults = ["failed", "auth-expired", "session-warning", "quota-low", "remote-task-error", "remote-task-missing", "sync-failed"];
+  const defaults = ["failed", "auth-expired", "session-warning", "auto-login-failed", "auto-login-recovered", "quota-low", "remote-task-error", "remote-task-missing", "sync-failed"];
   $("#notification-fields").innerHTML = `<div class="form-grid"><label class="field"><span>渠道名称</span><input name="name" maxlength="80" value="${escapeHtml(channel?.name ?? "")}" required></label><label class="field"><span>渠道类型</span><select id="notification-type" name="type" ${channel ? "disabled" : ""}>${Object.entries(notificationLabels).map(([value, label]) => `<option value="${value}" ${type === value ? "selected" : ""}>${label}</option>`).join("")}</select>${channel ? `<input type="hidden" name="type" value="${type}">` : ""}</label></div><div id="notification-type-fields"></div><div class="field"><span>通知事件</span><div class="event-check-grid">${Object.entries(notificationEventLabels).map(([event, label]) => `<label class="event-check"><input type="checkbox" name="event" value="${event}" ${(channel?.events ?? defaults).includes(event) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("")}</div></div><div class="toggle-row"><div><strong>启用渠道</strong><small>保存后立即生效</small></div><label class="switch"><input type="checkbox" name="enabled" ${channel?.enabled !== false ? "checked" : ""}><span></span></label></div>`;
   renderNotificationTypeFields(type, channel);
   $("#notification-dialog").showModal();

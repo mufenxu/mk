@@ -12,6 +12,8 @@ function messageFor(event, context) {
     failed: "发送失败",
     "auth-expired": "登录已失效",
     "session-warning": "登录凭证即将到期",
+    "auto-login-failed": "自动续期失败",
+    "auto-login-recovered": "自动续期已恢复",
     duplicate: "检测到重复并跳过",
     "quota-low": "每日额度不足",
     "remote-task-error": "远端任务异常",

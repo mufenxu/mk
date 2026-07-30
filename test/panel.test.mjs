@@ -149,7 +149,7 @@ test("panel auth and task APIs keep the MonkeyCode cookie encrypted", async () =
     assert.equal(configOnDisk.includes("private-session-cookie"), false);
     assert.equal(configOnDisk.includes("sessionEncrypted"), true);
     const parsedConfig = JSON.parse(configOnDisk);
-    assert.equal(parsedConfig.version, 9);
+    assert.equal(parsedConfig.version, 10);
     assert.equal(parsedConfig.tasks[0].keepAwake, true);
     assert.deepEqual(parsedConfig.tasks[0].schedule.times, ["09:00"]);
     assert.equal(parsedConfig.tasks[0].completion.enabled, true);
@@ -223,7 +223,7 @@ test("version 2 task credentials migrate to reusable accounts without losing the
     const store = await new DataStore(directory, key).init();
     const publicConfig = store.getPublicConfig();
     const resolvedTask = store.getTask(taskId, { withSession: true });
-    assert.equal(publicConfig.version, 9);
+    assert.equal(publicConfig.version, 10);
     assert.equal(publicConfig.accounts.length, 1);
     assert.equal(publicConfig.accounts[0].sessionConfigured, true);
     assert.equal(publicConfig.tasks[0].accountId, publicConfig.accounts[0].id);
@@ -234,7 +234,7 @@ test("version 2 task credentials migrate to reusable accounts without losing the
     assert.equal(resolvedTask.baseUrl, "https://monkeycode-ai.com");
 
     const current = JSON.parse(await readFile(path.join(directory, "config.json"), "utf8"));
-    assert.equal(current.version, 9);
+    assert.equal(current.version, 10);
     assert.equal("sessionEncrypted" in current.tasks[0], false);
     const backups = await readdir(path.join(directory, "backups"));
     assert.equal(backups.length, 1);
@@ -275,7 +275,7 @@ test("version 3 accounts migrate to browser-bridge configuration without changin
   try {
     const store = await new DataStore(directory, key).init();
     const account = store.getAccount(accountId, { withSession: true });
-    assert.equal(store.getPublicConfig().version, 9);
+    assert.equal(store.getPublicConfig().version, 10);
     assert.equal(account.session, "existing-private-cookie");
     assert.equal(account.sessionSource, "manual");
     assert.equal(account.sessionExpiresAt, null);
@@ -315,7 +315,7 @@ test("version 5 configuration gains persistent remote sync defaults", async () =
       quotaReserveTokens: 0,
     });
     const current = JSON.parse(await readFile(path.join(directory, "config.json"), "utf8"));
-    assert.equal(current.version, 9);
+    assert.equal(current.version, 10);
     assert.deepEqual(current.remoteSettings, store.getPublicConfig().remoteSettings);
     const backups = await readdir(path.join(directory, "backups"));
     assert.equal(backups.length, 1);

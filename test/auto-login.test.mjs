@@ -160,7 +160,7 @@ test("backs off after a failed automatic login", async () => {
     assert.equal(failed.autoLoginNextAttemptAt, "2026-07-30T12:15:00.000Z");
     assert.equal(service.needsRenewal(failed, now), false);
     assert.equal(notifications.length, 1);
-    assert.equal(notifications[0].event, "auth-expired");
+    assert.equal(notifications[0].event, "auto-login-failed");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

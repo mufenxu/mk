@@ -536,15 +536,27 @@ export class TaskRunner {
       let event = null;
       let detail = null;
       let marker = null;
-      if (account.sessionExpiresAt) {
+      if (account.lastValidationStatus === "invalid") {
+        event = !account.autoLoginEnabled || account.lastAutoLoginStatus === "failed" ? "auth-expired" : null;
+        detail = account.autoLoginEnabled
+          ? "Cookie is invalid and automatic login could not restore the session"
+          : "Cookie is invalid; sign in to MonkeyCode again to resume this account";
+        marker = `${account.sessionUpdatedAt ?? "unknown"}:invalid:${event}`;
+      } else if (account.sessionExpiresAt) {
         const expiry = sessionExpiry(account, now);
-        event = expiry.expired ? "auth-expired" : expiry.daysRemaining <= 3 ? "session-warning" : null;
+        const remainingMs = new Date(account.sessionExpiresAt).getTime() - now.getTime();
+        const renewalFailed = account.lastAutoLoginStatus === "failed";
+        event = expiry.expired
+          ? !account.autoLoginEnabled || renewalFailed ? "auth-expired" : null
+          : account.autoLoginEnabled
+            ? renewalFailed && remainingMs <= 6 * 60 * 60_000 ? "session-warning" : null
+            : expiry.daysRemaining <= 3 ? "session-warning" : null;
         detail = expiry.expired
           ? account.autoLoginEnabled
-            ? "Cookie has expired; automatic login will retry according to its backoff schedule"
+            ? "Cookie has expired and automatic login could not restore the session"
             : "Cookie has expired; sign in to MonkeyCode again to resume this account"
           : account.autoLoginEnabled
-            ? `Cookie expires in ${expiry.daysRemaining} day(s); automatic renewal is enabled`
+            ? "Cookie expires within 6 hours and the latest automatic renewal attempt failed"
             : `Cookie expires in ${expiry.daysRemaining} day(s); sign in again before it expires`;
         marker = `${account.sessionUpdatedAt ?? "unknown"}:${account.sessionExpiresAt}:${event}`;
       } else {

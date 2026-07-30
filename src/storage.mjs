@@ -208,6 +208,8 @@ function cleanEvents(events) {
     "failed",
     "auth-expired",
     "session-warning",
+    "auto-login-failed",
+    "auto-login-recovered",
     "duplicate",
     "quota-low",
     "remote-task-error",
@@ -303,7 +305,7 @@ export class DataStore {
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
       this.config = {
-        version: 9,
+        version: 10,
         enabled: true,
         remoteSettings: cleanRemoteSettings(),
         operationsSettings: cleanOperationsSettings(),
@@ -319,7 +321,7 @@ export class DataStore {
   }
 
   validateEncryptedConfig(config) {
-    if (!config || ![2, 3, 4, 5, 6, 7, 8, 9].includes(config.version) || !Array.isArray(config.tasks) || !Array.isArray(config.notifications)) {
+    if (!config || ![2, 3, 4, 5, 6, 7, 8, 9, 10].includes(config.version) || !Array.isArray(config.tasks) || !Array.isArray(config.notifications)) {
       throw new ConfigError("Unsupported or invalid control panel configuration");
     }
     if (config.version === 2) {
@@ -479,14 +481,28 @@ export class DataStore {
     };
   }
 
+  migrateV9(config) {
+    return {
+      ...config,
+      version: 10,
+      notifications: config.notifications.map((notification) => ({
+        ...notification,
+        events: notification.events.includes("auth-expired")
+          ? [...new Set([...notification.events, "auto-login-failed", "auto-login-recovered"])]
+          : notification.events,
+      })),
+    };
+  }
+
   migrateConfig(config) {
-    if (config.version === 2) return this.migrateV8(this.migrateV7(this.migrateV6(this.migrateV5(this.migrateV4(this.migrateV3(this.migrateV2(config)))))));
-    if (config.version === 3) return this.migrateV8(this.migrateV7(this.migrateV6(this.migrateV5(this.migrateV4(this.migrateV3(config))))));
-    if (config.version === 4) return this.migrateV8(this.migrateV7(this.migrateV6(this.migrateV5(this.migrateV4(config)))));
-    if (config.version === 5) return this.migrateV8(this.migrateV7(this.migrateV6(this.migrateV5(config))));
-    if (config.version === 6) return this.migrateV8(this.migrateV7(this.migrateV6(config)));
-    if (config.version === 7) return this.migrateV8(this.migrateV7(config));
-    if (config.version === 8) return this.migrateV8(config);
+    if (config.version === 2) return this.migrateV9(this.migrateV8(this.migrateV7(this.migrateV6(this.migrateV5(this.migrateV4(this.migrateV3(this.migrateV2(config))))))));
+    if (config.version === 3) return this.migrateV9(this.migrateV8(this.migrateV7(this.migrateV6(this.migrateV5(this.migrateV4(this.migrateV3(config)))))));
+    if (config.version === 4) return this.migrateV9(this.migrateV8(this.migrateV7(this.migrateV6(this.migrateV5(this.migrateV4(config))))));
+    if (config.version === 5) return this.migrateV9(this.migrateV8(this.migrateV7(this.migrateV6(this.migrateV5(config)))));
+    if (config.version === 6) return this.migrateV9(this.migrateV8(this.migrateV7(this.migrateV6(config))));
+    if (config.version === 7) return this.migrateV9(this.migrateV8(this.migrateV7(config)));
+    if (config.version === 8) return this.migrateV9(this.migrateV8(config));
+    if (config.version === 9) return this.migrateV9(config);
     return config;
   }
 

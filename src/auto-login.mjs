@@ -6,7 +6,12 @@ import { ConfigError, RemoteError } from "./errors.mjs";
 
 const SESSION_COOKIE = "monkeycode_ai_session";
 const USER_AGENT = "monkeycode-daily-sender/1.0";
-const RENEW_BEFORE_MS = 24 * 60 * 60_000;
+const RENEW_BEFORE_MIN_MS = 18 * 60 * 60_000;
+const RENEW_BEFORE_MAX_MS = 30 * 60 * 60_000;
+const SCHEDULE_DELAY_MIN_MS = 60_000;
+const SCHEDULE_DELAY_MAX_MS = 3 * 60_000;
+const SCHEDULE_ATTEMPT_WINDOW_MS = 60 * 60_000;
+const MAX_SCHEDULE_ATTEMPTS_PER_HOUR = 5;
 const FAILURE_DELAYS_MS = [15 * 60_000, 60 * 60_000, 6 * 60 * 60_000, 24 * 60 * 60_000];
 
 function fnv1a(value) {
@@ -169,9 +174,27 @@ export class AutoLoginService {
     this.login = options.login ?? loginWithPassword;
     this.checkSession = options.checkSession ?? checkSession;
     this.intervalMs = options.intervalMs ?? 60_000;
-    this.renewBeforeMs = options.renewBeforeMs ?? RENEW_BEFORE_MS;
+    const fixedRenewBeforeMs = options.renewBeforeMs;
+    this.renewBeforeMinMs = fixedRenewBeforeMs ?? options.renewBeforeMinMs ?? RENEW_BEFORE_MIN_MS;
+    this.renewBeforeMaxMs = fixedRenewBeforeMs ?? options.renewBeforeMaxMs ?? RENEW_BEFORE_MAX_MS;
+    this.scheduleDelayMinMs = options.scheduleDelayMinMs ?? SCHEDULE_DELAY_MIN_MS;
+    this.scheduleDelayMaxMs = options.scheduleDelayMaxMs ?? SCHEDULE_DELAY_MAX_MS;
+    this.maxScheduleAttemptsPerHour = options.maxScheduleAttemptsPerHour ?? MAX_SCHEDULE_ATTEMPTS_PER_HOUR;
+    this.random = options.random ?? Math.random;
     this.inflight = new Map();
+    this.loginQueue = Promise.resolve();
+    this.scheduleAttempts = [];
+    this.nextScheduleAttemptAt = 0;
+    this.tickPromise = null;
     this.timer = null;
+  }
+
+  renewalLeadMs(account) {
+    const minimum = Math.min(this.renewBeforeMinMs, this.renewBeforeMaxMs);
+    const maximum = Math.max(this.renewBeforeMinMs, this.renewBeforeMaxMs);
+    if (minimum === maximum) return minimum;
+    const seed = `${account.id ?? account.name ?? "account"}:${account.sessionExpiresAt ?? "session"}`;
+    return minimum + (fnv1a(seed) % (maximum - minimum + 1));
   }
 
   needsRenewal(account, now = new Date()) {
@@ -180,17 +203,28 @@ export class AutoLoginService {
     if (Number.isFinite(nextAttemptAt) && nextAttemptAt > now.getTime()) return false;
     if (!account.sessionConfigured || account.lastValidationStatus === "invalid") return true;
     const expiresAt = new Date(account.sessionExpiresAt ?? 0).getTime();
-    return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt - now.getTime() <= this.renewBeforeMs;
+    return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt - now.getTime() <= this.renewalLeadMs(account);
   }
 
   async renewIfNeeded(account, options = {}) {
-    if (!this.needsRenewal(account, options.now ?? new Date())) return { renewed: false, account };
+    const now = options.now ?? new Date();
+    if (!this.needsRenewal(account, now)) return { renewed: false, account };
+    if (options.trigger === "task-run") {
+      const expiresAt = new Date(account.sessionExpiresAt ?? 0).getTime();
+      const sessionUsable = account.sessionConfigured
+        && account.lastValidationStatus !== "invalid"
+        && Number.isFinite(expiresAt)
+        && expiresAt > now.getTime();
+      if (sessionUsable) return { renewed: false, deferred: true, account };
+    }
     return { renewed: true, account: await this.renewAccount(account.id, options) };
   }
 
   async renewAccount(id, options = {}) {
     if (this.inflight.has(id)) return this.inflight.get(id);
-    const promise = this.#renewAccount(id, options).finally(() => this.inflight.delete(id));
+    const queued = this.loginQueue.then(() => this.#renewAccount(id, options));
+    this.loginQueue = queued.catch(() => {});
+    const promise = queued.finally(() => this.inflight.delete(id));
     this.inflight.set(id, promise);
     return promise;
   }
@@ -200,6 +234,7 @@ export class AutoLoginService {
     if (!account) throw new ConfigError("Account not found");
     if (!account.login?.email || !account.login?.password) throw new ConfigError("Automatic login credentials are not configured");
     const now = options.now ?? new Date();
+    const previousFailureCount = account.autoLoginFailureCount ?? 0;
     let updated;
     try {
       const result = await this.login({
@@ -227,11 +262,14 @@ export class AutoLoginService {
         trigger: options.trigger ?? "schedule",
         detail,
       });
-      await this.notifications.notify("auth-expired", {
-        accountName: updated.name,
-        detail,
-        at: now.toISOString(),
-      });
+      const failureCount = updated.autoLoginFailureCount ?? 1;
+      if (failureCount === 1 || failureCount === 3 || (failureCount > 3 && failureCount % 3 === 0)) {
+        await this.notifications.notify("auto-login-failed", {
+          accountName: updated.name,
+          detail: `${detail}; retry ${updated.autoLoginNextAttemptAt ?? "will follow the configured backoff"}`,
+          at: now.toISOString(),
+        });
+      }
       throw error;
     }
     await this.store.appendLog({
@@ -242,17 +280,44 @@ export class AutoLoginService {
       trigger: options.trigger ?? "schedule",
       detail: "MonkeyCode session was renewed automatically",
     });
+    if (previousFailureCount > 0) {
+      await this.notifications.notify("auto-login-recovered", {
+        accountName: updated.name,
+        detail: `Automatic login recovered after ${previousFailureCount} failed attempt(s)`,
+        at: now.toISOString(),
+      });
+    }
     return updated;
   }
 
-  async tick(now = new Date()) {
+  async #tick(now) {
+    const nowMs = now.getTime();
+    this.scheduleAttempts = this.scheduleAttempts.filter((attemptedAt) => attemptedAt > nowMs - SCHEDULE_ATTEMPT_WINDOW_MS);
+    if (nowMs < this.nextScheduleAttemptAt || this.scheduleAttempts.length >= this.maxScheduleAttemptsPerHour) return;
+
     for (const account of this.store.getPublicConfig().accounts ?? []) {
+      if (!this.needsRenewal(account, now)) continue;
       try {
-        await this.renewIfNeeded(account, { now, trigger: "schedule" });
+        await this.renewAccount(account.id, { now, trigger: "schedule" });
       } catch {
         // Failure state, backoff and notification are recorded by renewAccount().
       }
+      this.scheduleAttempts.push(nowMs);
+      const minimum = Math.min(this.scheduleDelayMinMs, this.scheduleDelayMaxMs);
+      const maximum = Math.max(this.scheduleDelayMinMs, this.scheduleDelayMaxMs);
+      const delay = minimum + Math.floor(this.random() * (maximum - minimum + 1));
+      this.nextScheduleAttemptAt = nowMs + delay;
+      return;
     }
+  }
+
+  tick(now = new Date()) {
+    if (this.tickPromise) return this.tickPromise;
+    const promise = this.#tick(now).finally(() => {
+      if (this.tickPromise === promise) this.tickPromise = null;
+    });
+    this.tickPromise = promise;
+    return promise;
   }
 
   start() {
