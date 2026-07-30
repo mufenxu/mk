@@ -101,6 +101,98 @@ test("tracks an acknowledged message until the remote task completes", async () 
   assert.equal(result.tokenDelta, 45);
 });
 
+test("treats stream task-ended as completion without polling for finished status", async () => {
+  const task = {
+    id: "task-1",
+    name: "Daily report",
+    accountId: "account-1",
+    monkeyTaskId: "remote-task",
+    baseUrl: "https://monkeycode-ai.com",
+    session: "session",
+    prompt: "Report",
+    dryRun: false,
+    dedupe: true,
+    retry: { attempts: 1, delaySeconds: 0 },
+    completion: { enabled: true, timeoutMinutes: 1, pollSeconds: 5 },
+    failurePolicy: { autoPauseAfter: 3 },
+    schedule: { timeZone: "Asia/Shanghai" },
+  };
+  const logs = [];
+  const notices = [];
+  let detailCalls = 0;
+  const store = {
+    getTask: () => task,
+    getPublicConfig: () => ({
+      operationsSettings: { accountConcurrency: 1 },
+      remoteSettings: { quotaGuardEnabled: false },
+    }),
+    taskStateFile: () => "state.json",
+    appendLog: async (entry) => { logs.push(entry); },
+  };
+  const runner = new TaskRunner(store, { notify: async (event) => { notices.push(event); } }, {
+    wait: async () => { throw new Error("trackCompletion should not poll after stream completion"); },
+    remoteTaskDetail: async () => {
+      detailCalls += 1;
+      return { status: "processing", stats: { totalTokens: detailCalls === 1 ? 100 : 145 } };
+    },
+    runOnce: async () => ({
+      status: "sent",
+      acceptedAt: "2026-07-27T01:00:00.000Z",
+      streamCompletion: { completionStatus: "completed" },
+    }),
+  });
+
+  const result = await runner.execute(task.id, { mode: "send" });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.tokenDelta, 45);
+  assert.equal(detailCalls, 2);
+  assert.deepEqual(logs.map((entry) => entry.status), ["accepted", "completed"]);
+  assert.deepEqual(notices, ["completed"]);
+});
+
+test("does not start a second polling timeout after stream completion times out", async () => {
+  const task = {
+    id: "task-1",
+    name: "Daily report",
+    accountId: "account-1",
+    monkeyTaskId: "remote-task",
+    baseUrl: "https://monkeycode-ai.com",
+    session: "session",
+    prompt: "Report",
+    dryRun: false,
+    dedupe: true,
+    retry: { attempts: 1, delaySeconds: 0 },
+    completion: { enabled: true, timeoutMinutes: 1, pollSeconds: 5 },
+    failurePolicy: { autoPauseAfter: 3 },
+    schedule: { timeZone: "Asia/Shanghai" },
+  };
+  const logs = [];
+  const store = {
+    getTask: () => task,
+    getPublicConfig: () => ({
+      operationsSettings: { accountConcurrency: 1 },
+      remoteSettings: { quotaGuardEnabled: false },
+    }),
+    taskStateFile: () => "state.json",
+    appendLog: async (entry) => { logs.push(entry); },
+  };
+  const runner = new TaskRunner(store, { notify: async () => {} }, {
+    wait: async () => { throw new Error("trackCompletion should not run after stream timeout"); },
+    remoteTaskDetail: async () => ({ status: "processing", stats: { totalTokens: 100 } }),
+    runOnce: async () => ({
+      status: "sent",
+      acceptedAt: "2026-07-27T01:00:00.000Z",
+      streamCompletion: { completionStatus: "stream-timeout" },
+    }),
+  });
+
+  const result = await runner.execute(task.id, { mode: "send" });
+
+  assert.equal(result.status, "completion-timeout");
+  assert.deepEqual(logs.map((entry) => entry.status), ["accepted", "completion-timeout"]);
+});
+
 test("automatically pauses a task after consecutive scheduled failures", async () => {
   let scheduleState = { task: { consecutiveFailures: 2, occurrences: [] } };
   const disabled = [];

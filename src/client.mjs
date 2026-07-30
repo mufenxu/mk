@@ -295,12 +295,15 @@ export async function getRecentUserInputs(config) {
   }
 }
 
-export function sendUserInput(config) {
+export function sendUserInput(config, options = {}) {
   const streamUrl = makeStreamUrl(config.baseUrl, config.taskId);
   const origin = new URL(config.baseUrl).origin;
+  const waitForCompletion = Boolean(options.waitForCompletion);
+  const completionTimeoutMs = options.completionTimeoutMs ?? config.timeoutMs;
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let acceptedAt = null;
     const socket = new WebSocket(streamUrl, {
       handshakeTimeout: config.timeoutMs,
       headers: {
@@ -311,13 +314,17 @@ export function sendUserInput(config) {
     });
 
     const timer = setTimeout(() => {
-      finish(new RemoteError("Timed out waiting for MonkeyCode to acknowledge the message"));
-    }, config.timeoutMs);
+      if (acceptedAt && waitForCompletion) {
+        finish(null, { acceptedAt, completionStatus: "stream-timeout" });
+      } else {
+        finish(new RemoteError("Timed out waiting for MonkeyCode to acknowledge the message"));
+      }
+    }, waitForCompletion ? completionTimeoutMs : config.timeoutMs);
     const abort = () => finish(new CancelledError());
     config.signal?.addEventListener("abort", abort, { once: true });
     if (config.signal?.aborted) abort();
 
-    function finish(error) {
+    function finish(error, result = {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -325,7 +332,7 @@ export function sendUserInput(config) {
       if (socket.readyState === WebSocket.OPEN) socket.close(1000);
       else if (socket.readyState === WebSocket.CONNECTING) socket.terminate();
       if (error) reject(error);
-      else resolve();
+      else resolve(result);
     }
 
     socket.once("unexpected-response", (_request, response) => {
@@ -352,9 +359,26 @@ export function sendUserInput(config) {
       }
 
       if (event.type === "user-input") {
-        finish();
+        acceptedAt = new Date().toISOString();
+        if (!waitForCompletion) finish(null, { acceptedAt });
+      } else if (event.type === "task-ended") {
+        finish(null, {
+          acceptedAt: acceptedAt ?? new Date().toISOString(),
+          completionStatus: "completed",
+          event,
+        });
       } else if (event.type === "task-error" || event.type === "error") {
-        finish(new RemoteError(`MonkeyCode rejected the message: ${event.message ?? event.data ?? "unknown error"}`));
+        const message = event.message ?? event.data ?? "unknown error";
+        if (acceptedAt && waitForCompletion) {
+          finish(null, {
+            acceptedAt,
+            completionStatus: "failed",
+            completionDetail: `MonkeyCode reported an error: ${message}`,
+            event,
+          });
+        } else {
+          finish(new RemoteError(`MonkeyCode rejected the message: ${message}`));
+        }
       }
     });
 
@@ -364,7 +388,11 @@ export function sendUserInput(config) {
 
     socket.once("close", (code, reason) => {
       if (!settled) {
-        finish(new RemoteError(`WebSocket closed before acknowledgement (${code}: ${reason.toString()})`));
+        if (acceptedAt && waitForCompletion) {
+          finish(null, { acceptedAt, completionStatus: "stream-closed" });
+        } else {
+          finish(new RemoteError(`WebSocket closed before acknowledgement (${code}: ${reason.toString()})`));
+        }
       }
     });
   });
@@ -421,8 +449,11 @@ export async function runOnce(config, options = {}) {
     return { status: "dry-run", day: today };
   }
 
-  await sendUserInput(config);
-  const acceptedAt = new Date().toISOString();
+  const streamResult = await sendUserInput(config, {
+    waitForCompletion: Boolean(options.waitForCompletion),
+    completionTimeoutMs: options.completionTimeoutMs,
+  });
+  const acceptedAt = streamResult.acceptedAt ?? new Date().toISOString();
   await writeState(config.stateFile, {
     taskId: config.taskId,
     day: today,
@@ -431,5 +462,5 @@ export async function runOnce(config, options = {}) {
     acceptedAt,
   });
   log(`sent: MonkeyCode acknowledged the message for ${today}`);
-  return { status: "sent", day: today, acceptedAt };
+  return { status: "sent", day: today, acceptedAt, streamCompletion: streamResult };
 }

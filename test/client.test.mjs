@@ -13,7 +13,7 @@ import { AuthExpiredError, CancelledError } from "../src/errors.mjs";
 const session = "test-session-value";
 const taskId = "678fed52-b2a8-467f-a94c-3b0fde6f1c89";
 
-async function createMock({ history = [], authenticated = true, acknowledge = true } = {}) {
+async function createMock({ history = [], authenticated = true, acknowledge = true, completionEvents = [] } = {}) {
   let websocketConnections = 0;
   let receivedPrompt = null;
   const server = createServer((request, response) => {
@@ -58,6 +58,9 @@ async function createMock({ history = [], authenticated = true, acknowledge = tr
       const inner = JSON.parse(Buffer.from(event.data, "base64").toString("utf8"));
       receivedPrompt = Buffer.from(inner.content, "base64").toString("utf8");
       if (acknowledge) webSocket.send(JSON.stringify({ type: "user-input", data: event.data }));
+      for (const completionEvent of completionEvents) {
+        webSocket.send(JSON.stringify(completionEvent));
+      }
     });
   });
 
@@ -105,6 +108,27 @@ test("sends once, waits for acknowledgement, and records local state", async () 
     assert.equal(state.day, "2026-07-27");
     assert.equal(state.taskId, taskId);
     assert.match(state.promptHash, /^[0-9a-f]{64}$/);
+  } finally {
+    await mock.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("can wait for the stream task-ended event after acknowledgement", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "monkeycode-daily-"));
+  const mock = await createMock({ completionEvents: [{ type: "task-ended" }] });
+  const stateFile = path.join(directory, "state.json");
+  try {
+    const result = await runOnce(makeConfig(mock.baseUrl, stateFile), {
+      now: new Date("2026-07-27T01:00:00.000Z"),
+      waitForCompletion: true,
+      completionTimeoutMs: 2_000,
+    });
+    assert.equal(result.status, "sent");
+    assert.equal(result.streamCompletion.completionStatus, "completed");
+    assert.equal(mock.websocketConnections, 1);
+    const state = JSON.parse(await readFile(stateFile, "utf8"));
+    assert.equal(state.acceptedAt, result.acceptedAt);
   } finally {
     await mock.close();
     await rm(directory, { recursive: true, force: true });

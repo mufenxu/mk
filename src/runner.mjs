@@ -75,6 +75,7 @@ export class TaskRunner {
     this.running = new Map();
     this.queue = new Map();
     this.intervalMs = options.intervalMs ?? 30_000;
+    this.runOnce = options.runOnce ?? runOnce;
     this.remoteTaskDetail = options.remoteTaskDetail ?? getRemoteTaskDetail;
     this.wait = options.wait ?? wait;
     this.now = options.now ?? (() => Date.now());
@@ -380,11 +381,15 @@ export class TaskRunner {
     while (!finalError && !result && attempt < attempts) {
       attempt += 1;
       try {
-        result = await runOnce(this.clientConfig(task, prompt, dryRun, signal), {
+        result = await this.runOnce(this.clientConfig(task, prompt, dryRun, signal), {
           now,
           force: mode === "force" || task.dedupe === false,
           dedupeKey: options.occurrence?.key,
           duplicateSince: options.occurrence?.at,
+          waitForCompletion: !dryRun && Boolean(task.completion?.enabled),
+          completionTimeoutMs: Number.isFinite(task.completion?.timeoutMinutes)
+            ? task.completion.timeoutMinutes * 60_000
+            : undefined,
         });
         break;
       } catch (error) {
@@ -415,12 +420,33 @@ export class TaskRunner {
         attempts: attempt,
         durationMs: Date.now() - startedAt,
       });
-      try {
-        const completion = await this.trackCompletion(task, baseline, acceptedAt, signal);
-        result = { ...result, ...completion };
-        if (completion.status === "failed") finalError = new RemoteError(completion.detail);
-      } catch (error) {
-        finalError = error;
+      const streamCompletion = result.streamCompletion;
+      if (streamCompletion?.completionStatus === "completed") {
+        let snapshot = null;
+        try { snapshot = await this.fetchRemoteTask(task, signal); } catch { /* Stream event is authoritative. */ }
+        result = {
+          ...result,
+          status: "completed",
+          snapshot,
+          tokenDelta: snapshot ? Math.max(0, tokenTotal(snapshot) - tokenTotal(baseline)) : 0,
+        };
+      } else if (streamCompletion?.completionStatus === "failed") {
+        result = { ...result, status: "failed", detail: streamCompletion.completionDetail };
+        finalError = new RemoteError(streamCompletion.completionDetail);
+      } else if (streamCompletion?.completionStatus === "stream-timeout") {
+        result = {
+          ...result,
+          status: "completion-timeout",
+          detail: "Message was accepted, but the MonkeyCode stream did not report task-ended before timeout",
+        };
+      } else {
+        try {
+          const completion = await this.trackCompletion(task, baseline, acceptedAt, signal);
+          result = { ...result, ...completion };
+          if (completion.status === "failed") finalError = new RemoteError(completion.detail);
+        } catch (error) {
+          finalError = error;
+        }
       }
     }
 
