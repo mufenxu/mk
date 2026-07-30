@@ -40,7 +40,7 @@ services:
         max-file: "3"
 
   node-pool-controller:
-    image: crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/monkeycode-node-pool:${MONKEYCODE_NODE_POOL_IMAGE_TAG:-latest}
+    image: crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/my:${MONKEYCODE_NODE_POOL_IMAGE_TAG:-node-pool-latest}
     restart: unless-stopped
     init: true
     env_file:

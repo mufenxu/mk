@@ -20,7 +20,6 @@ env:
   REGISTRY: crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com
   REGISTRY_USERNAME: mufenx
   IMAGE_NAME: crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/my
-  NODE_POOL_IMAGE_NAME: crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/monkeycode-node-pool
 
 jobs:
   build:
@@ -77,13 +76,13 @@ jobs:
       - name: Build Node Pool production image
         shell: bash
         run: |
-          node_pool_image_name="${NODE_POOL_IMAGE_NAME,,}"
+          node_pool_source_image="${IMAGE_NAME_LOWER}:node-pool-sha-${SHORT_SHA}"
           docker build \
             --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --tag "${node_pool_image_name}:sha-${SHORT_SHA}" \
+            --tag "${node_pool_source_image}" \
             services/node-pool
-          echo "NODE_POOL_IMAGE_NAME_LOWER=${node_pool_image_name}" >> "${GITHUB_ENV}"
+          echo "NODE_POOL_SOURCE_IMAGE=${node_pool_source_image}" >> "${GITHUB_ENV}"
 
       - name: Smoke test Node Pool image
         shell: bash
@@ -97,7 +96,7 @@ jobs:
             --publish 127.0.0.1:4190:4190 \
             --env MK_ADMIN_TOKEN=smoke-test-admin-token-1234567890 \
             --env MK_WORKER_SECRET=smoke-test-worker-secret-12345678901234567890 \
-            "${NODE_POOL_IMAGE_NAME_LOWER}:sha-${SHORT_SHA}"
+            "${NODE_POOL_SOURCE_IMAGE}"
           for attempt in {1..20}; do
             if curl --fail --silent --show-error http://127.0.0.1:4190/healthz; then
               exit 0
@@ -133,21 +132,20 @@ jobs:
         shell: bash
         run: |
           source_image="${IMAGE_NAME_LOWER}:sha-${SHORT_SHA}"
-          node_pool_source_image="${NODE_POOL_IMAGE_NAME_LOWER}:sha-${SHORT_SHA}"
           docker push "${source_image}"
-          docker push "${node_pool_source_image}"
+          docker push "${NODE_POOL_SOURCE_IMAGE}"
 
           if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
             docker tag "${source_image}" "${IMAGE_NAME_LOWER}:latest"
-            docker tag "${node_pool_source_image}" "${NODE_POOL_IMAGE_NAME_LOWER}:latest"
+            docker tag "${NODE_POOL_SOURCE_IMAGE}" "${IMAGE_NAME_LOWER}:node-pool-latest"
             docker push "${IMAGE_NAME_LOWER}:latest"
-            docker push "${NODE_POOL_IMAGE_NAME_LOWER}:latest"
+            docker push "${IMAGE_NAME_LOWER}:node-pool-latest"
           fi
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             version="${GITHUB_REF_NAME#v}"
             docker tag "${source_image}" "${IMAGE_NAME_LOWER}:${version}"
-            docker tag "${node_pool_source_image}" "${NODE_POOL_IMAGE_NAME_LOWER}:${version}"
+            docker tag "${NODE_POOL_SOURCE_IMAGE}" "${IMAGE_NAME_LOWER}:node-pool-${version}"
             docker push "${IMAGE_NAME_LOWER}:${version}"
-            docker push "${NODE_POOL_IMAGE_NAME_LOWER}:${version}"
+            docker push "${IMAGE_NAME_LOWER}:node-pool-${version}"
           fi

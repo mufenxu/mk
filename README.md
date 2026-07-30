@@ -164,14 +164,13 @@ npm run send
 
 ## Docker 与 GitHub Actions
 
-面板和 Node Pool 控制器镜像只在 GitHub Actions 中构建，并发布到阿里云 ACR：
+面板和 Node Pool 控制器镜像只在 GitHub Actions 中构建，并发布到同一个阿里云 ACR 镜像仓库：
 
 ```text
 crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/my
-crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/monkeycode-node-pool
 ```
 
-推送 `main` 后，两个镜像都会发布 `latest` 和 `sha-<提交号>`；推送 `v*` 标签后额外发布去掉 `v` 前缀的版本标签。Pull Request 只执行检查、构建和两个容器的健康检查，不推送镜像。仓库需要配置 GitHub Actions Secret `ALIYUN_ACR_PASSWORD`，值为阿里云容器镜像服务个人版的固定登录密码；登录用户名和镜像地址已经固定在工作流中。密码不会写入代码、日志或镜像。
+面板使用 `latest`、`sha-<提交号>` 和版本号标签；Node Pool 使用 `node-pool-latest`、`node-pool-sha-<提交号>` 和 `node-pool-<版本号>` 标签，两个镜像不会互相覆盖。Pull Request 只执行检查、构建和两个容器的健康检查，不推送镜像。仓库需要配置 GitHub Actions Secret `ALIYUN_ACR_PASSWORD`，值为阿里云容器镜像服务个人版的固定登录密码；登录用户名和镜像地址已经固定在工作流中。密码不会写入代码、日志或镜像。
 
 VPS 在 `compose.yaml` 同目录创建面板使用的 `.env`：
 
