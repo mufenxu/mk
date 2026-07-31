@@ -13,13 +13,16 @@ The controller keeps worker and job state, selects an eligible worker from decla
 - Leased `deploy`, `start`, `stop`, and `restart` jobs
 - Managed Git checkout, build, process startup, local health checks, and logs
 - Per-worker authenticated bundle download for repeatable node onboarding
+- Management APIs for workers, resource status, job submission, cancellation, and Worker token generation
 
-This phase does not install FRP, configure Nginx, or deploy to a real VPS. It also does not provide a browser dashboard yet.
+This phase does not install FRP, configure Nginx, or deploy to a real VPS.
 Deployments stop the existing process before updating its managed checkout, so this first phase has a short deployment outage and no automatic rollback.
 
 ## Docker controller deployment
 
-The controller image is built by the repository-level GitHub Actions workflow and deployed by the repository-level `compose.yaml`. The image includes the authenticated Worker download bundle, so the VPS only needs to pull and start the published image. MonkeyCode workers continue to run directly with Node.js.
+The controller image is built by the repository-level GitHub Actions workflow and deployed by the repository-level `compose.yaml`. Browser management lives in the main MonkeyCode panel, which calls this controller over the Docker network without exposing the admin token to the browser. The controller image includes the authenticated Worker download bundle, and MonkeyCode workers continue to run directly with Node.js.
+
+Set `MK_MANAGEMENT_URL` to the main panel deployment page. Requests to the controller root then redirect to that unified management entry; `/healthz` and all Worker API paths remain unchanged.
 
 ## Controller
 
@@ -76,4 +79,4 @@ The controller selects the healthiest eligible worker. `--worker node-id` can pi
 - Treat worker checkouts and build outputs as replaceable cache.
 - Do not expose a worker repository root through an HTTP file server.
 - Run the controller only behind HTTPS and keep its state file private.
-- A later phase should add FRP tunnels, Nginx upstream updates, supervised worker startup, and a management UI.
+- A later phase should add FRP tunnels, Nginx upstream updates, supervised worker startup, and automated rollback.

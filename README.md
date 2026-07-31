@@ -21,6 +21,7 @@
 - 通用 Webhook、企业微信、钉钉、Telegram、Bark 和 SMTP 邮件通知。
 - 执行日志筛选、CSV 导出、配置导入导出和最近 30 份自动备份。
 - 响应式桌面与手机界面。
+- 在同一登录会话中管理 Node Pool 节点、资源、项目白名单与部署任务。
 
 Cookie 和通知密钥使用 AES-256-GCM 加密保存。浏览器桥接令牌在 VPS 上只保存 SHA-256 哈希；管理 API 不返回原始密钥，面板写操作使用 HttpOnly 管理会话和 CSRF 校验。
 
@@ -181,14 +182,16 @@ MONKEYCODE_SECURE_COOKIE=true
 MONKEYCODE_BROWSER_BRIDGE_ENABLED=true
 ```
 
-Node Pool 使用独立的 `.env.node-pool`，避免控制器密钥进入面板容器。已有 Worker 时必须沿用原控制器密钥，不能重新生成：
+Node Pool 默认复用 `compose.yaml` 同目录的 `.env`，以兼容宝塔 Compose。已有 Worker 时必须把原控制器密钥加入该文件，不能重新生成：
 
 ```dotenv
 MK_ADMIN_TOKEN=沿用现有管理令牌
 MK_WORKER_SECRET=沿用现有Worker密钥
 ```
 
-面板和控制器在容器内分别监听 `4180`、`4190`，宿主机只监听 `127.0.0.1`，继续由各自的 Nginx HTTPS 域名代理。Node Pool 镜像已内置受保护的 Worker 下载包，VPS 不需要构建镜像或生成 `dist`。
+需要隔离环境文件时，可以在主 `.env` 中设置 `MONKEYCODE_NODE_POOL_ENV_FILE=.env.node-pool`，并确保该文件与 `compose.yaml` 位于同一目录。宝塔部署默认不要设置这个变量。
+
+面板和控制器在容器内分别监听 `4180`、`4190`，宿主机只监听 `127.0.0.1`，继续由各自的 Nginx HTTPS 域名代理。节点池管理已经合并到 `mk.pxyb.cn/#deployments`，面板通过 Docker 内网调用控制器，`MK_ADMIN_TOKEN` 不会发给浏览器；`pool.pxyb.cn` 根路径只跳转到统一管理入口，Worker API 和受保护的安装包下载路径保持不变。
 
 首次部署或更新：
 

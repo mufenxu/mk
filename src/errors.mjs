@@ -35,3 +35,11 @@ export class BridgeError extends Error {
     this.code = code;
   }
 }
+
+export class NodePoolError extends Error {
+  constructor(message, status = 502) {
+    super(message);
+    this.name = "NodePoolError";
+    this.status = status;
+  }
+}

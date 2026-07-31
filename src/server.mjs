@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isExtensionOrigin } from "./browser-bridge.mjs";
-import { AuthExpiredError, BridgeError, ConfigError, RemoteError } from "./errors.mjs";
+import { AuthExpiredError, BridgeError, ConfigError, NodePoolError, RemoteError } from "./errors.mjs";
 import { createToken, verifyPassword } from "./security.mjs";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -91,6 +91,7 @@ export class PanelServer {
     this.remoteSync = options.remoteSync ?? null;
     this.environmentKeeper = options.environmentKeeper ?? null;
     this.autoLogin = options.autoLogin ?? null;
+    this.nodePool = options.nodePool ?? null;
     this.sessions = new Map();
     this.loginAttempts = new Map();
     this.server = createServer((request, response) => this.handle(request, response));
@@ -309,6 +310,33 @@ export class PanelServer {
             diskFreeGb,
           },
         });
+        return;
+      }
+
+      if (url.pathname === "/api/node-pool/overview" && request.method === "GET") {
+        if (!this.nodePool) {
+          json(response, 200, { available: false, workers: [], jobs: [], jobCounts: {}, error: "节点池管理尚未配置" });
+          return;
+        }
+        json(response, 200, await this.nodePool.overview());
+        return;
+      }
+      if (url.pathname === "/api/node-pool/jobs" && request.method === "POST") {
+        if (!this.nodePool) throw new NodePoolError("节点池管理尚未配置", 503);
+        json(response, 201, await this.nodePool.createJob(await readBody(request, 64 * 1024)));
+        return;
+      }
+      if (url.pathname === "/api/node-pool/workers/token" && request.method === "POST") {
+        if (!this.nodePool) throw new NodePoolError("节点池管理尚未配置", 503);
+        const body = await readBody(request, 16 * 1024);
+        json(response, 200, await this.nodePool.issueWorkerToken(body.nodeId));
+        return;
+      }
+      const nodePoolCancellation = /^\/api\/node-pool\/jobs\/([^/]+)\/cancel$/.exec(url.pathname);
+      if (nodePoolCancellation && request.method === "POST") {
+        if (!this.nodePool) throw new NodePoolError("节点池管理尚未配置", 503);
+        await readBody(request, 16 * 1024);
+        json(response, 200, await this.nodePool.cancelJob(decodeURIComponent(nodePoolCancellation[1])));
         return;
       }
 
@@ -586,6 +614,11 @@ export class PanelServer {
       } else if (error instanceof RemoteError) {
         json(response, error.status && error.status >= 400 && error.status < 600 ? error.status : 502, {
           error: "remote-error",
+          message: error.message,
+        });
+      } else if (error instanceof NodePoolError) {
+        json(response, error.status && error.status >= 400 && error.status < 600 ? error.status : 502, {
+          error: "node-pool-error",
           message: error.message,
         });
       } else {

@@ -7,6 +7,7 @@ import { BrowserBridgeService } from "./browser-bridge.mjs";
 import { EnvironmentKeeper } from "./environment-keeper.mjs";
 import { ConfigError } from "./errors.mjs";
 import { NotificationService } from "./notifications.mjs";
+import { NodePoolClient } from "./node-pool.mjs";
 import { RemoteSyncService } from "./remote-sync.mjs";
 import { TaskRunner } from "./runner.mjs";
 import { parseMasterKey } from "./security.mjs";
@@ -20,6 +21,11 @@ function panelConfig(env = process.env) {
   }
   const port = Number(env.MONKEYCODE_PANEL_PORT || 4180);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ConfigError("MONKEYCODE_PANEL_PORT is invalid");
+  const nodePoolUrl = env.MONKEYCODE_NODE_POOL_URL?.trim() || null;
+  const nodePoolAdminToken = env.MK_ADMIN_TOKEN?.trim() || null;
+  if (nodePoolUrl && (!nodePoolAdminToken || nodePoolAdminToken.length < 24)) {
+    throw new ConfigError("MK_ADMIN_TOKEN must contain at least 24 characters when node-pool management is enabled");
+  }
   return {
     password,
     masterKey: parseMasterKey(env.MONKEYCODE_MASTER_KEY),
@@ -28,6 +34,9 @@ function panelConfig(env = process.env) {
     port,
     secureCookie: env.MONKEYCODE_SECURE_COOKIE === "true",
     browserBridgeEnabled: env.MONKEYCODE_BROWSER_BRIDGE_ENABLED === "true",
+    nodePoolUrl,
+    nodePoolAdminToken,
+    nodePoolPublicUrl: env.MONKEYCODE_NODE_POOL_PUBLIC_URL?.trim() || "https://pool.pxyb.cn",
   };
 }
 
@@ -40,7 +49,12 @@ try {
   const environmentKeeper = new EnvironmentKeeper(store);
   const remoteSync = new RemoteSyncService(store, notifications);
   const browserBridge = config.browserBridgeEnabled ? new BrowserBridgeService(store) : null;
-  const server = new PanelServer({ ...config, store, notifications, runner, browserBridge, remoteSync, environmentKeeper, autoLogin });
+  const nodePool = config.nodePoolUrl ? new NodePoolClient({
+    url: config.nodePoolUrl,
+    adminToken: config.nodePoolAdminToken,
+    publicUrl: config.nodePoolPublicUrl,
+  }) : null;
+  const server = new PanelServer({ ...config, store, notifications, runner, browserBridge, remoteSync, environmentKeeper, autoLogin, nodePool });
   await environmentKeeper.start();
   const address = await server.listen();
   autoLogin.start();

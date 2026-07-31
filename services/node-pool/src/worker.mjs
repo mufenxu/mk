@@ -76,6 +76,7 @@ async function nodeSnapshot() {
     nodeId: config.nodeId,
     capacity: config.capacity,
     labels: config.labels,
+    projects: Object.keys(config.projects),
     metrics: await metrics(),
     allocations: manager.allocations(),
     activeJob: activeJob ? { jobId: activeJob.id, leaseToken: activeJob.leaseToken } : null,

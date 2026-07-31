@@ -21,13 +21,27 @@ const stateFile = process.env.MK_STATE_FILE ?? path.resolve("data/state.json");
 const workerBundleFile = process.env.MK_WORKER_BUNDLE_FILE ? path.resolve(process.env.MK_WORKER_BUNDLE_FILE) : null;
 const adminToken = process.env.MK_ADMIN_TOKEN ?? "";
 const workerSecret = process.env.MK_WORKER_SECRET ?? "";
+const managementUrl = process.env.MK_MANAGEMENT_URL?.trim() || null;
 
 if (adminToken.length < 24) throw new Error("MK_ADMIN_TOKEN must contain at least 24 characters");
 if (workerSecret.length < 32) throw new Error("MK_WORKER_SECRET must contain at least 32 characters");
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid MK_CONTROLLER_PORT");
+if (managementUrl) {
+  const target = new URL(managementUrl);
+  if (!["http:", "https:"].includes(target.protocol) || target.username || target.password) throw new Error("Invalid MK_MANAGEMENT_URL");
+}
 
 const store = new StateStore(stateFile);
 await store.load();
+
+function securityHeaders(response) {
+  response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  response.setHeader("Referrer-Policy", "no-referrer");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+}
 
 function httpError(statusCode, message) {
   return Object.assign(new Error(message), { statusCode });
@@ -78,6 +92,11 @@ function cleanLabels(value) {
   return [...new Set((Array.isArray(value) ? value : []).map(String).map((item) => item.trim()).filter(Boolean))].slice(0, 32);
 }
 
+function cleanProjects(value) {
+  return [...new Set((Array.isArray(value) ? value : []).map(String).map((item) => item.trim())
+    .filter((item) => /^[a-zA-Z0-9][a-zA-Z0-9._-]{1,79}$/.test(item)))].slice(0, 100);
+}
+
 function cleanAllocations(value) {
   return (Array.isArray(value) ? value : []).slice(0, 100).map((entry) => ({
     project: String(entry.project ?? "").slice(0, 80),
@@ -110,6 +129,7 @@ async function registerWorker(request, response) {
       id: nodeId,
       capacity: normalizeCapacity(body.capacity),
       labels: cleanLabels(body.labels),
+      projects: cleanProjects(body.projects),
       maxConcurrentJobs: 1,
       status: "online",
       registeredAt: previous.registeredAt ?? now,
@@ -131,6 +151,7 @@ async function heartbeatWorker(request, response, nodeId) {
     if (!current) throw httpError(404, "Worker is not registered");
     current.status = "online";
     current.lastSeenAt = new Date(now).toISOString();
+    if (body.projects !== undefined) current.projects = cleanProjects(body.projects);
     current.metrics = cleanMetrics(body.metrics);
     current.allocations = cleanAllocations(body.allocations);
     const active = body.activeJob;
@@ -193,6 +214,27 @@ async function createJob(request, response) {
   sendJson(response, 201, { job: publicJob(job) });
 }
 
+async function cancelJob(request, response, jobId) {
+  requireAdmin(request);
+  await readJson(request);
+  const job = await store.mutate((state) => {
+    const current = state.jobs.find((entry) => entry.id === jobId);
+    if (!current) throw httpError(404, "Job not found");
+    if (current.status !== "queued") throw httpError(409, "Only queued jobs can be cancelled");
+    current.status = "cancelled";
+    current.finishedAt = new Date().toISOString();
+    return publicJob(current);
+  });
+  sendJson(response, 200, { job });
+}
+
+async function issueWorkerToken(request, response) {
+  requireAdmin(request);
+  const body = await readJson(request);
+  const nodeId = cleanNodeId(body.nodeId);
+  sendJson(response, 200, { nodeId, token: deriveWorkerToken(workerSecret, nodeId) });
+}
+
 async function completeJob(request, response, jobId) {
   const body = await readJson(request);
   const nodeId = cleanNodeId(body.nodeId);
@@ -234,7 +276,7 @@ async function listStatus(request, response) {
     ...worker,
     online: workerOnline(worker, now),
   }));
-  const jobCounts = Object.fromEntries(["queued", "leased", "completed", "failed"].map((status) => [
+  const jobCounts = Object.fromEntries(["queued", "leased", "completed", "failed", "cancelled"].map((status) => [
     status,
     state.jobs.filter((job) => job.status === status).length,
   ]));
@@ -262,8 +304,14 @@ async function sendWorkerBundle(request, response, nodeId) {
 }
 
 const server = http.createServer(async (request, response) => {
+  securityHeaders(response);
   try {
     const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+    if (["GET", "HEAD"].includes(request.method) && url.pathname === "/" && managementUrl) {
+      response.writeHead(302, { Location: managementUrl, "Cache-Control": "no-store" });
+      response.end();
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/healthz") return sendJson(response, 200, { status: "ok" });
     if (request.method === "GET" && url.pathname === "/api/status") return await listStatus(request, response);
     if (request.method === "GET" && url.pathname === "/api/workers") {
@@ -275,7 +323,11 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, { jobs: (await store.read()).jobs.map(publicJob) });
     }
     if (request.method === "POST" && url.pathname === "/api/workers/register") return await registerWorker(request, response);
+    if (request.method === "POST" && url.pathname === "/api/workers/token") return await issueWorkerToken(request, response);
     if (request.method === "POST" && url.pathname === "/api/jobs") return await createJob(request, response);
+
+    const cancellationMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/cancel$/);
+    if (request.method === "POST" && cancellationMatch) return await cancelJob(request, response, cancellationMatch[1]);
 
     const bundleMatch = url.pathname.match(/^\/api\/workers\/([^/]+)\/bundle$/);
     if (request.method === "GET" && bundleMatch) {
