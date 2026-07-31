@@ -14,7 +14,7 @@ for (let index = 0; index < args.length; index += 2) {
   options[key.slice(2)] = value;
 }
 
-const controllerUrl = (process.env.MK_CONTROLLER_URL ?? "http://127.0.0.1:4190").replace(/\/$/, "");
+const controllerUrl = (process.env.MK_CONTROLLER_URL ?? "http://127.0.0.1:4191").replace(/\/$/, "");
 const token = process.env.MK_ADMIN_TOKEN ?? "";
 if (token.length < 24) throw new Error("MK_ADMIN_TOKEN is missing or invalid");
 

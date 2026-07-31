@@ -32,7 +32,7 @@ Requires Node.js 20 or newer. Generate two independent secrets:
 export MK_ADMIN_TOKEN="$(openssl rand -hex 32)"
 export MK_WORKER_SECRET="$(openssl rand -hex 32)"
 export MK_CONTROLLER_HOST=127.0.0.1
-export MK_CONTROLLER_PORT=4190
+export MK_CONTROLLER_PORT=4191
 npm run controller
 ```
 

@@ -16,7 +16,7 @@ import {
 } from "./scheduler.mjs";
 
 const host = process.env.MK_CONTROLLER_HOST ?? "127.0.0.1";
-const port = Number(process.env.MK_CONTROLLER_PORT ?? 4190);
+const port = Number(process.env.MK_CONTROLLER_PORT ?? 4191);
 const stateFile = process.env.MK_STATE_FILE ?? path.resolve("data/state.json");
 const workerBundleFile = process.env.MK_WORKER_BUNDLE_FILE ? path.resolve(process.env.MK_WORKER_BUNDLE_FILE) : null;
 const adminToken = process.env.MK_ADMIN_TOKEN ?? "";

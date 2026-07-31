@@ -93,7 +93,7 @@ jobs:
           trap cleanup EXIT
           docker run --detach \
             --name monkeycode-node-pool-smoke \
-            --publish 127.0.0.1:4190:4190 \
+            --publish 127.0.0.1:4190:4191 \
             --env MK_ADMIN_TOKEN=smoke-test-admin-token-1234567890 \
             --env MK_WORKER_SECRET=smoke-test-worker-secret-12345678901234567890 \
             "${NODE_POOL_SOURCE_IMAGE}"
