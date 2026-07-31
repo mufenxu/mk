@@ -18,7 +18,7 @@ FROM node:24-bookworm-slim AS runtime
 
 ENV NODE_ENV=production \
     MK_CONTROLLER_HOST=0.0.0.0 \
-    MK_CONTROLLER_PORT=4190 \
+    MK_CONTROLLER_PORT=4191 \
     MK_STATE_FILE=/data/state.json \
     MK_WORKER_BUNDLE_FILE=/dist/monkeycode-node-pool.tar.gz
 
@@ -32,9 +32,9 @@ RUN mkdir -p /data && chown node:node /data
 LABEL org.opencontainers.image.source="https://github.com/mufenxu/mk"
 
 USER node
-EXPOSE 4190
+EXPOSE 4191
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:4190/healthz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+  CMD ["node", "-e", "fetch('http://127.0.0.1:4191/healthz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
 
 CMD ["node", "src/controller.mjs"]

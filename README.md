@@ -186,7 +186,7 @@ MONKEYCODE_NODE_POOL_PUBLIC_URL=https://mk.pxyb.cn/node-pool
 MK_MANAGEMENT_URL=https://mk.pxyb.cn/#deployments
 ```
 
-面板和控制器在容器内分别监听 `4180`、`4190`，宿主机只监听 `127.0.0.1`。公网统一使用 `mk.pxyb.cn`：管理页面位于 `/#deployments`，Worker API 和受保护的安装包位于 `/node-pool/`。所有公网请求都进入面板的 4180 端口，面板只把经过路径白名单校验的 Worker 请求转发到控制器；节点池管理 API 和 `MK_ADMIN_TOKEN` 不会暴露到公网。Nginx 无需为 4190 增加第二个反向代理。
+面板和控制器在容器内分别监听 `4180`、`4191`，控制器宿主机兼容映射到 `127.0.0.1:4190`，且宿主机只监听 `127.0.0.1`。公网统一使用 `mk.pxyb.cn`：管理页面位于 `/#deployments`，Worker API 和受保护的安装包位于 `/node-pool/`。所有公网请求都进入面板的 4180 端口，面板只把经过路径白名单校验的 Worker 请求转发到控制器；节点池管理 API 和 `MK_ADMIN_TOKEN` 不会暴露到公网。Nginx 无需为 4190 增加第二个反向代理。
 
 首次部署或更新：
 
