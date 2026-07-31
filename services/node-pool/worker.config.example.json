@@ -1,7 +1,7 @@
 {
   "version": 1,
   "nodeId": "monkey-env-01",
-  "controllerUrl": "https://control.example.com",
+  "controllerUrl": "https://mk.pxyb.cn/node-pool",
   "rootDir": "/workspace/.worker",
   "capacity": {
     "cpu": 1.5,

@@ -84,7 +84,7 @@ ssh -L 4180:127.0.0.1:4180 your-user@your-vps
 
 浏览器扩展长期自动同步时，推荐使用 [Nginx 示例](deploy/nginx/monkeycode-panel.conf) 配置公网域名和有效 HTTPS 证书，并保持 `MONKEYCODE_SECURE_COOKIE=true`。不要直接把 4180 端口暴露到公网。
 
-本地开发可创建一个被 Git 忽略的 `.env.panel`，然后运行 `npm run start:local`。该文件中的主密钥必须与本地数据目录配套，不能提交或用于 VPS。
+本地开发和 Docker 部署统一使用被 Git 忽略的 `.env`，变量清单见 [`.env.example`](.env.example)。主密钥必须与数据目录配套，不能提交到 Git。
 
 ## Chrome 扩展与多账号
 
@@ -173,25 +173,20 @@ crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/my
 
 面板使用 `latest`、`sha-<提交号>` 和版本号标签；Node Pool 使用 `node-pool-latest`、`node-pool-sha-<提交号>` 和 `node-pool-<版本号>` 标签，两个镜像不会互相覆盖。Pull Request 只执行检查、构建和两个容器的健康检查，不推送镜像。仓库需要配置 GitHub Actions Secret `ALIYUN_ACR_PASSWORD`，值为阿里云容器镜像服务个人版的固定登录密码；登录用户名和镜像地址已经固定在工作流中。密码不会写入代码、日志或镜像。
 
-VPS 在 `compose.yaml` 同目录创建面板使用的 `.env`：
+VPS 在 `compose.yaml` 同目录创建唯一的真实配置文件 `.env`，可直接以 [`.env.example`](.env.example) 为变量清单。至少填写：
 
 ```dotenv
 MONKEYCODE_PANEL_PASSWORD=填写至少12位的管理密码
 MONKEYCODE_MASTER_KEY=填写32字节Base64主密钥
 MONKEYCODE_SECURE_COOKIE=true
 MONKEYCODE_BROWSER_BRIDGE_ENABLED=true
-```
-
-Node Pool 默认复用 `compose.yaml` 同目录的 `.env`，以兼容宝塔 Compose。已有 Worker 时必须把原控制器密钥加入该文件，不能重新生成：
-
-```dotenv
 MK_ADMIN_TOKEN=沿用现有管理令牌
 MK_WORKER_SECRET=沿用现有Worker密钥
+MONKEYCODE_NODE_POOL_PUBLIC_URL=https://mk.pxyb.cn/node-pool
+MK_MANAGEMENT_URL=https://mk.pxyb.cn/#deployments
 ```
 
-需要隔离环境文件时，可以在主 `.env` 中设置 `MONKEYCODE_NODE_POOL_ENV_FILE=.env.node-pool`，并确保该文件与 `compose.yaml` 位于同一目录。宝塔部署默认不要设置这个变量。
-
-面板和控制器在容器内分别监听 `4180`、`4190`，宿主机只监听 `127.0.0.1`，继续由各自的 Nginx HTTPS 域名代理。节点池管理已经合并到 `mk.pxyb.cn/#deployments`，面板通过 Docker 内网调用控制器，`MK_ADMIN_TOKEN` 不会发给浏览器；`pool.pxyb.cn` 根路径只跳转到统一管理入口，Worker API 和受保护的安装包下载路径保持不变。
+面板和控制器在容器内分别监听 `4180`、`4190`，宿主机只监听 `127.0.0.1`。公网统一使用 `mk.pxyb.cn`：管理页面位于 `/#deployments`，Worker API 和受保护的安装包位于 `/node-pool/`。所有公网请求都进入面板的 4180 端口，面板只把经过路径白名单校验的 Worker 请求转发到控制器；节点池管理 API 和 `MK_ADMIN_TOKEN` 不会暴露到公网。Nginx 无需为 4190 增加第二个反向代理。
 
 首次部署或更新：
 

@@ -36,7 +36,7 @@ function panelConfig(env = process.env) {
     browserBridgeEnabled: env.MONKEYCODE_BROWSER_BRIDGE_ENABLED === "true",
     nodePoolUrl,
     nodePoolAdminToken,
-    nodePoolPublicUrl: env.MONKEYCODE_NODE_POOL_PUBLIC_URL?.trim() || "https://pool.pxyb.cn",
+    nodePoolPublicUrl: env.MONKEYCODE_NODE_POOL_PUBLIC_URL?.trim() || "https://mk.pxyb.cn/node-pool",
   };
 }
 

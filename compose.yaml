@@ -4,13 +4,13 @@ services:
     restart: unless-stopped
     init: true
     env_file:
-      - ${MONKEYCODE_PANEL_ENV_FILE:-.env}
+      - .env
     environment:
       MONKEYCODE_PANEL_HOST: 0.0.0.0
       MONKEYCODE_PANEL_PORT: "4180"
       MONKEYCODE_DATA_DIR: /data
       MONKEYCODE_NODE_POOL_URL: http://node-pool-controller:4190
-      MONKEYCODE_NODE_POOL_PUBLIC_URL: https://pool.pxyb.cn
+      MONKEYCODE_NODE_POOL_PUBLIC_URL: https://mk.pxyb.cn/node-pool
     ports:
       - "127.0.0.1:4180:4180"
     volumes:
@@ -46,7 +46,7 @@ services:
     restart: unless-stopped
     init: true
     env_file:
-      - ${MONKEYCODE_NODE_POOL_ENV_FILE:-.env}
+      - .env
     environment:
       MK_CONTROLLER_HOST: 0.0.0.0
       MK_CONTROLLER_PORT: "4190"

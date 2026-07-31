@@ -22,7 +22,7 @@ Deployments stop the existing process before updating its managed checkout, so t
 
 The controller image is built by the repository-level GitHub Actions workflow and deployed by the repository-level `compose.yaml`. Browser management lives in the main MonkeyCode panel, which calls this controller over the Docker network without exposing the admin token to the browser. The controller image includes the authenticated Worker download bundle, and MonkeyCode workers continue to run directly with Node.js.
 
-Set `MK_MANAGEMENT_URL` to the main panel deployment page. Requests to the controller root then redirect to that unified management entry; `/healthz` and all Worker API paths remain unchanged.
+Set `MK_MANAGEMENT_URL` to the main panel deployment page. The main panel exposes the allowlisted Worker API under `https://mk.pxyb.cn/node-pool/`; the controller's admin API remains on the internal Docker network, while browser management stays at `https://mk.pxyb.cn/#deployments`.
 
 ## Controller
 
@@ -64,7 +64,7 @@ The worker stores managed repositories, runtime state, and logs below its config
 From an administrator machine:
 
 ```bash
-export MK_CONTROLLER_URL=https://control.example.com
+export MK_CONTROLLER_URL=https://mk.pxyb.cn/node-pool
 export MK_ADMIN_TOKEN="the-admin-token"
 
 npm run job -- deploy example-api main --cpu 0.5 --memory 512 --labels node

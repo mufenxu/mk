@@ -162,6 +162,16 @@ export class PanelServer {
     securityHeaders(response);
     const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
     try {
+      if (["GET", "HEAD"].includes(request.method) && ["/node-pool", "/node-pool/"].includes(url.pathname)) {
+        response.writeHead(302, { Location: "/#deployments", "Cache-Control": "no-store" });
+        response.end();
+        return;
+      }
+      if (url.pathname.startsWith("/node-pool/")) {
+        if (!this.nodePool) throw new NodePoolError("节点池管理尚未配置", 503);
+        await this.nodePool.forwardWorkerRequest(request, response, url.pathname.slice("/node-pool".length));
+        return;
+      }
       if (!url.pathname.startsWith("/api/")) {
         if (await this.serveStatic(url.pathname, response)) return;
         json(response, 404, { error: "not-found" });
@@ -605,7 +615,9 @@ export class PanelServer {
 
       json(response, 404, { error: "not-found" });
     } catch (error) {
-      if (error instanceof BridgeError) {
+      if (response.headersSent) {
+        response.destroy();
+      } else if (error instanceof BridgeError) {
         json(response, error.status, { error: error.code, message: error.message });
       } else if (error instanceof AuthExpiredError) {
         json(response, 422, { error: "auth-expired", message: error.message });

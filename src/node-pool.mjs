@@ -1,3 +1,6 @@
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+
 import { NodePoolError } from "./errors.mjs";
 
 function parseBaseUrl(value, name) {
@@ -45,6 +48,46 @@ export class NodePoolClient {
       throw new NodePoolError(payload.error || `节点池请求失败（HTTP ${response.status}）`, status);
     }
     return payload;
+  }
+
+  async forwardWorkerRequest(request, response, pathname) {
+    const allowed = (
+      (request.method === "POST" && pathname === "/api/workers/register")
+      || (request.method === "POST" && /^\/api\/workers\/[^/]+\/(heartbeat|claim)$/.test(pathname))
+      || (request.method === "POST" && /^\/api\/jobs\/[^/]+\/complete$/.test(pathname))
+      || (request.method === "GET" && /^\/api\/workers\/[^/]+\/bundle$/.test(pathname))
+    );
+    if (!allowed) throw new NodePoolError("Not found", 404);
+
+    const hasBody = !["GET", "HEAD"].includes(request.method);
+    let upstream;
+    try {
+      upstream = await fetch(new URL(pathname.replace(/^\//, ""), this.url), {
+        method: request.method,
+        headers: {
+          Accept: request.headers.accept ?? "application/json",
+          Authorization: request.headers.authorization ?? "",
+          ...(request.headers["content-type"] ? { "Content-Type": request.headers["content-type"] } : {}),
+        },
+        body: hasBody ? request : undefined,
+        ...(hasBody ? { duplex: "half" } : {}),
+        signal: AbortSignal.timeout(120_000),
+      });
+    } catch {
+      throw new NodePoolError("节点池控制器暂时不可用", 503);
+    }
+
+    const headers = {};
+    for (const name of ["content-type", "content-length", "content-disposition", "cache-control"]) {
+      const value = upstream.headers.get(name);
+      if (value) headers[name] = value;
+    }
+    response.writeHead(upstream.status, headers);
+    if (!upstream.body) {
+      response.end();
+      return;
+    }
+    await pipeline(Readable.fromWeb(upstream.body), response);
   }
 
   async overview() {
