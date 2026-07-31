@@ -106,6 +106,10 @@ export class NodePoolClient {
     return this.request(`api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST", body: {} });
   }
 
+  deleteWorker(nodeId) {
+    return this.request(`api/workers/${encodeURIComponent(nodeId)}`, { method: "DELETE" });
+  }
+
   async issueWorkerToken(nodeId) {
     const result = await this.request("api/workers/token", { method: "POST", body: { nodeId } });
     return {

@@ -342,6 +342,12 @@ export class PanelServer {
         json(response, 200, await this.nodePool.issueWorkerToken(body.nodeId));
         return;
       }
+      const nodePoolWorkerDeletion = /^\/api\/node-pool\/workers\/([^/]+)$/.exec(url.pathname);
+      if (nodePoolWorkerDeletion && request.method === "DELETE") {
+        if (!this.nodePool) throw new NodePoolError("节点池管理尚未配置", 503);
+        json(response, 200, await this.nodePool.deleteWorker(decodeURIComponent(nodePoolWorkerDeletion[1])));
+        return;
+      }
       const nodePoolCancellation = /^\/api\/node-pool\/jobs\/([^/]+)\/cancel$/.exec(url.pathname);
       if (nodePoolCancellation && request.method === "POST") {
         if (!this.nodePool) throw new NodePoolError("节点池管理尚未配置", 503);

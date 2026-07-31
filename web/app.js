@@ -737,8 +737,9 @@ function renderDeploymentWorkers() {
       <td><div class="deployment-resource"><strong>${deploymentNumber(usage.cpu, 1)} / ${deploymentNumber(worker.capacity?.cpu, 1)} CPU</strong><span>${deploymentNumber(usage.memoryMb)} / ${deploymentNumber(worker.capacity?.memoryMb)} MB · 磁盘可用 ${deploymentNumber(worker.metrics?.diskFreeMb)} MB</span></div></td>
       <td><div class="badge-stack">${projects}</div></td><td><div class="badge-stack">${runtimes}</div></td><td><div class="deployment-services">${services}</div></td>
       <td><strong>${relativeTime(worker.lastSeenAt)}</strong><div class="deployment-meta">${formatDate(worker.lastSeenAt, true)}</div></td>
+      <td><div class="deployment-row-actions"><button class="icon-button danger-icon" type="button" data-delete-deployment-worker="${escapeHtml(worker.id)}" title="删除节点" aria-label="删除节点 ${escapeHtml(worker.id)}"><i data-lucide="trash-2"></i></button></div></td>
     </tr>`;
-  }).join("") : deploymentEmptyRow(7, query ? "没有匹配的节点" : (state.nodePool.available === false ? "节点池控制器不可用" : "尚未接入 Worker"));
+  }).join("") : deploymentEmptyRow(8, query ? "没有匹配的节点" : (state.nodePool.available === false ? "节点池控制器不可用" : "尚未接入 Worker"));
 }
 
 function renderDeploymentJobs() {
@@ -1352,6 +1353,19 @@ document.addEventListener("click", async (event) => {
       await loadData();
       toast("部署任务已取消");
     } catch (error) { toast(error.message, "error"); }
+  }
+  const deleteDeploymentWorker = event.target.closest("[data-delete-deployment-worker]");
+  if (deleteDeploymentWorker) {
+    const nodeId = deleteDeploymentWorker.dataset.deleteDeploymentWorker;
+    const worker = state.nodePool.workers?.find((entry) => entry.id === nodeId);
+    const message = `确定删除节点“${nodeId}”吗？节点凭证将立即失效，且不会再参与调度。该操作不会停止节点内已经运行的项目。${worker?.online ? " 当前节点在线，删除后 Worker 会断开。" : ""}`;
+    if (await confirmAction("删除节点", message, "删除节点")) {
+      try {
+        await api(`/api/node-pool/workers/${encodeURIComponent(nodeId)}`, { method: "DELETE" });
+        await loadData();
+        toast("节点已删除");
+      } catch (error) { toast(error.message, "error"); }
+    }
   }
   const copyDeployment = event.target.closest("[data-copy-target]");
   if (copyDeployment) copyDeploymentValue(copyDeployment.dataset.copyTarget);

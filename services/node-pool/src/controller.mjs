@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
-import { bearerToken, deriveWorkerToken, secureEqual } from "./security.mjs";
+import { bearerToken, createWorkerToken, deriveWorkerToken, digestWorkerToken, secureEqual } from "./security.mjs";
 import { StateStore } from "./state-store.mjs";
 import {
   claimForWorker,
@@ -77,9 +77,18 @@ function requireAdmin(request) {
   if (!secureEqual(bearerToken(request), adminToken)) throw httpError(401, "Unauthorized");
 }
 
-function requireWorker(request, nodeId) {
-  const expected = deriveWorkerToken(workerSecret, nodeId);
-  if (!secureEqual(bearerToken(request), expected)) throw httpError(401, "Unauthorized");
+async function requireWorker(request, nodeId) {
+  const token = bearerToken(request);
+  const authorization = await store.read((state) => ({
+    credential: state.workerCredentials?.[nodeId] ?? null,
+    legacyWorker: Boolean(state.workers[nodeId]),
+    revoked: Boolean(state.revokedWorkers?.[nodeId]),
+  }));
+  if (authorization.revoked) throw httpError(401, "Worker credential has been revoked");
+  const valid = authorization.credential
+    ? secureEqual(digestWorkerToken(token), authorization.credential)
+    : authorization.legacyWorker && secureEqual(token, deriveWorkerToken(workerSecret, nodeId));
+  if (!valid) throw httpError(401, "Unauthorized");
 }
 
 function cleanNodeId(value) {
@@ -156,9 +165,10 @@ function cleanMetrics(value = {}) {
 async function registerWorker(request, response) {
   const body = await readJson(request);
   const nodeId = cleanNodeId(body.nodeId);
-  requireWorker(request, nodeId);
+  await requireWorker(request, nodeId);
   const now = new Date().toISOString();
   const worker = await store.mutate((state) => {
+    if (state.revokedWorkers?.[nodeId]) throw httpError(401, "Worker credential has been revoked");
     const previous = state.workers[nodeId] ?? {};
     state.workers[nodeId] = {
       ...previous,
@@ -181,7 +191,7 @@ async function registerWorker(request, response) {
 }
 
 async function heartbeatWorker(request, response, nodeId) {
-  requireWorker(request, nodeId);
+  await requireWorker(request, nodeId);
   const body = await readJson(request);
   const now = Date.now();
   const worker = await store.mutate((state) => {
@@ -207,7 +217,7 @@ async function heartbeatWorker(request, response, nodeId) {
 }
 
 async function claimJob(request, response, nodeId) {
-  requireWorker(request, nodeId);
+  await requireWorker(request, nodeId);
   await readJson(request);
   const job = await store.mutate((state) => {
     if (!state.workers[nodeId]) throw httpError(404, "Worker is not registered");
@@ -272,13 +282,40 @@ async function issueWorkerToken(request, response) {
   requireAdmin(request);
   const body = await readJson(request);
   const nodeId = cleanNodeId(body.nodeId);
-  sendJson(response, 200, { nodeId, token: deriveWorkerToken(workerSecret, nodeId) });
+  const token = createWorkerToken();
+  await store.mutate((state) => {
+    if (state.workers[nodeId]) throw httpError(409, "Worker node id already exists");
+    state.workerCredentials ??= {};
+    state.revokedWorkers ??= {};
+    state.workerCredentials[nodeId] = digestWorkerToken(token);
+    delete state.revokedWorkers[nodeId];
+  });
+  sendJson(response, 200, { nodeId, token });
+}
+
+async function deleteWorker(request, response, nodeId) {
+  requireAdmin(request);
+  const result = await store.mutate((state) => {
+    if (!state.workers[nodeId]) throw httpError(404, "Worker not found");
+    const blockingJobs = state.jobs.filter((job) => (
+      (job.status === "leased" && job.assignedWorkerId === nodeId)
+      || (job.status === "queued" && job.preferredWorkerId === nodeId)
+    ));
+    if (blockingJobs.length) throw httpError(409, "Worker still has queued or running jobs");
+    delete state.workers[nodeId];
+    state.workerCredentials ??= {};
+    state.revokedWorkers ??= {};
+    delete state.workerCredentials[nodeId];
+    state.revokedWorkers[nodeId] = { revokedAt: new Date().toISOString() };
+    return { nodeId, deleted: true };
+  });
+  sendJson(response, 200, result);
 }
 
 async function completeJob(request, response, jobId) {
   const body = await readJson(request);
   const nodeId = cleanNodeId(body.nodeId);
-  requireWorker(request, nodeId);
+  await requireWorker(request, nodeId);
   const completed = await store.mutate((state) => {
     const job = state.jobs.find((entry) => entry.id === jobId);
     if (!job) throw httpError(404, "Job not found");
@@ -324,7 +361,7 @@ async function listStatus(request, response) {
 }
 
 async function sendWorkerBundle(request, response, nodeId) {
-  requireWorker(request, nodeId);
+  await requireWorker(request, nodeId);
   if (!workerBundleFile) throw httpError(404, "Worker bundle is not configured");
   let information;
   try {
@@ -365,6 +402,11 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/workers/register") return await registerWorker(request, response);
     if (request.method === "POST" && url.pathname === "/api/workers/token") return await issueWorkerToken(request, response);
     if (request.method === "POST" && url.pathname === "/api/jobs") return await createJob(request, response);
+
+    const workerDeletionMatch = url.pathname.match(/^\/api\/workers\/([^/]+)$/);
+    if (request.method === "DELETE" && workerDeletionMatch) {
+      return await deleteWorker(request, response, cleanNodeId(decodeURIComponent(workerDeletionMatch[1])));
+    }
 
     const cancellationMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/cancel$/);
     if (request.method === "POST" && cancellationMatch) return await cancelJob(request, response, cancellationMatch[1]);

@@ -5,6 +5,8 @@ function initialState() {
   return {
     version: 1,
     workers: {},
+    workerCredentials: {},
+    revokedWorkers: {},
     jobs: [],
     updatedAt: new Date().toISOString(),
   };
@@ -23,6 +25,8 @@ export class StateStore {
       if (parsed?.version !== 1 || !parsed.workers || !Array.isArray(parsed.jobs)) {
         throw new Error("Unsupported state file format");
       }
+      parsed.workerCredentials ??= {};
+      parsed.revokedWorkers ??= {};
       this.state = parsed;
     } catch (error) {
       if (error.code !== "ENOENT") throw error;

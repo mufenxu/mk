@@ -1,9 +1,17 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 export function deriveWorkerToken(secret, nodeId) {
   if (!secret || secret.length < 32) throw new Error("MK_WORKER_SECRET must contain at least 32 characters");
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,63}$/.test(nodeId)) throw new Error("Invalid worker node id");
   return createHmac("sha256", secret).update(`worker:${nodeId}`).digest("base64url");
+}
+
+export function createWorkerToken() {
+  return randomBytes(32).toString("base64url");
+}
+
+export function digestWorkerToken(token) {
+  return createHash("sha256").update(String(token)).digest("base64url");
 }
 
 export function bearerToken(request) {

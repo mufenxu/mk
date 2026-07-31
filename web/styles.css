@@ -336,6 +336,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .deployment-empty-row td { height: 150px; color: var(--text-soft); text-align: center; }
 .deployment-row-actions { display: flex; justify-content: flex-end; gap: 2px; }
 .deployment-row-actions .icon-button { width: 34px; height: 34px; }
+.deployment-row-actions .danger-icon { color: var(--red); }
+.deployment-row-actions .danger-icon:hover { background: var(--red-soft); }
 .deployment-activity-list { overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-sm); }
 .deployment-activity { width: 100%; min-height: 66px; padding: 10px 13px; border: 0; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 10px; background: transparent; color: var(--text); text-align: left; }
 .deployment-activity:last-child { border-bottom: 0; }
