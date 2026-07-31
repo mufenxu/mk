@@ -788,9 +788,48 @@ function openWorkerTokenDialog() {
   $("#worker-token-result").hidden = true;
   $("#worker-token-value").value = "";
   $("#worker-bundle-url").value = "";
+  $("#worker-install-command").value = "";
   $("#worker-token-dialog").showModal();
   setTimeout(() => $("#worker-token-form").elements.nodeId.focus(), 0);
   icons();
+}
+
+function shellValue(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
+
+function workerInstallCommand({ nodeId, token, bundleUrl }) {
+  const controllerUrl = new URL(bundleUrl);
+  controllerUrl.pathname = controllerUrl.pathname.replace(/\/api\/workers\/[^/]+\/bundle\/?$/, "");
+  controllerUrl.search = "";
+  controllerUrl.hash = "";
+  const controller = controllerUrl.toString().replace(/\/$/, "");
+  const directory = `.monkeycode-worker-${nodeId}`;
+  return `WORKER_DIR="$HOME/${directory}"
+mkdir -p "$WORKER_DIR"
+cd "$WORKER_DIR"
+export MK_WORKER_TOKEN=${shellValue(token)}
+curl -fL -H "Authorization: Bearer \${MK_WORKER_TOKEN}" ${shellValue(bundleUrl)} -o monkeycode-node-pool.tar.gz
+tar -xzf monkeycode-node-pool.tar.gz
+cat > worker.config.json <<EOF
+{
+  "version": 1,
+  "nodeId": ${JSON.stringify(nodeId)},
+  "controllerUrl": ${JSON.stringify(controller)},
+  "rootDir": "$WORKER_DIR/data",
+  "capacity": {
+    "cpu": 1,
+    "memoryMb": 2048,
+    "diskMb": 10240
+  },
+  "labels": ["node"],
+  "pollIntervalSeconds": 5,
+  "heartbeatIntervalSeconds": 15,
+  "projects": {}
+}
+EOF
+export MK_WORKER_CONFIG="$WORKER_DIR/worker.config.json"
+npm run worker`;
 }
 
 function openDeploymentDetail(jobId) {
@@ -1569,6 +1608,7 @@ $("#worker-token-form").addEventListener("submit", async (event) => {
     const result = await api("/api/node-pool/workers/token", { method: "POST", body: { nodeId: new FormData(form).get("nodeId").trim() } });
     $("#worker-token-value").value = result.token;
     $("#worker-bundle-url").value = result.bundleUrl;
+    $("#worker-install-command").value = workerInstallCommand(result);
     $("#worker-token-result").hidden = false;
     icons();
   } catch (error) { toast(error.message, "error"); }

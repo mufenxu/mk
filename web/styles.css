@@ -355,7 +355,20 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .deployment-segmented span svg { width: 15px; height: 15px; }
 .deployment-segmented input:checked + span { background: var(--surface); color: var(--accent); box-shadow: 0 1px 3px rgb(18 30 25 / 10%); font-weight: 680; }
 .deployment-segmented input:focus-visible + span { outline: 3px solid rgb(15 107 80 / 18%); }
-.worker-token-result { padding-top: 18px; border-top: 1px solid var(--border); display: grid; gap: 14px; }
+.worker-token-dialog { width: min(760px, calc(100vw - 28px)); }
+.worker-onboarding-heading { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: start; gap: 10px; }
+.worker-step-number { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 750; }
+.worker-onboarding-heading h3 { margin: 1px 0 0; font-size: 13px; }
+.worker-onboarding-heading p { margin: 4px 0 0; color: var(--text-soft); font-size: 11px; line-height: 1.5; }
+.worker-token-result { padding-top: 18px; border-top: 1px solid var(--border); display: grid; gap: 16px; }
+.worker-install-command { min-width: 0; display: grid; gap: 8px; }
+.worker-command-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.worker-command-heading > span { color: #424b55; font-size: 12px; font-weight: 650; }
+.worker-command-heading .button { min-height: 32px; padding: 0 10px; font-size: 11px; }
+.worker-install-command textarea { height: 260px; min-height: 260px; resize: vertical; background: #f6f8f7; font-size: 11px; line-height: 1.55; white-space: pre; }
+.worker-credentials { padding-top: 2px; }
+.worker-credentials summary { width: max-content; color: var(--text-soft); font-size: 11px; cursor: pointer; }
+.worker-credential-fields { margin-top: 12px; display: grid; gap: 12px; }
 .deployment-copy-field { position: relative; display: block; }
 .deployment-copy-field input { padding-right: 43px; }
 .deployment-copy-field .icon-button { width: 35px; height: 35px; position: absolute; top: 3px; right: 3px; }

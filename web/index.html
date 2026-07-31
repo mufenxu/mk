@@ -288,14 +288,35 @@
     </form>
   </dialog>
 
-  <dialog id="worker-token-dialog" class="dialog">
+  <dialog id="worker-token-dialog" class="dialog worker-token-dialog">
     <form id="worker-token-form" method="dialog">
       <div class="dialog-header"><div><p class="eyebrow">WORKER</p><h2>接入新节点</h2></div><button class="icon-button" type="button" data-close-dialog="worker-token-dialog" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></div>
       <div class="dialog-body">
-        <label class="field"><span>节点 ID</span><input name="nodeId" maxlength="64" placeholder="monkey-env-01" required></label>
+        <div class="worker-onboarding-heading">
+          <div class="worker-step-number">1</div>
+          <div><h3>创建节点凭据</h3><p>为目标 MonkeyCode 环境填写唯一的节点 ID，然后生成专属凭据。</p></div>
+        </div>
+        <label class="field"><span>节点 ID</span><input name="nodeId" maxlength="64" placeholder="monkey-env-01" required><small class="field-hint">建议使用便于识别的名称，例如 monkey-env-01。</small></label>
         <div id="worker-token-result" class="worker-token-result" hidden>
-          <label class="field"><span>Worker 令牌</span><span class="deployment-copy-field"><input id="worker-token-value" class="mono" readonly><button class="icon-button" type="button" data-copy-target="worker-token-value" title="复制令牌" aria-label="复制令牌"><i data-lucide="copy"></i></button></span></label>
-          <label class="field"><span>安装包地址</span><span class="deployment-copy-field"><input id="worker-bundle-url" class="mono" readonly><button class="icon-button" type="button" data-copy-target="worker-bundle-url" title="复制地址" aria-label="复制地址"><i data-lucide="copy"></i></button></span></label>
+          <div class="worker-onboarding-heading">
+            <div class="worker-step-number">2</div>
+            <div><h3>在 MonkeyCode 环境运行命令</h3><p>打开目标环境的终端，复制并粘贴下面的完整命令。节点信息和令牌已自动填入，无需开放入站端口。</p></div>
+          </div>
+          <div class="worker-install-command">
+            <div class="worker-command-heading"><span>安装并启动 Worker</span><button class="button secondary compact" type="button" data-copy-target="worker-install-command"><i data-lucide="copy"></i><span>复制完整命令</span></button></div>
+            <textarea id="worker-install-command" class="mono" readonly spellcheck="false" aria-label="Worker 安装命令"></textarea>
+          </div>
+          <div class="worker-onboarding-heading">
+            <div class="worker-step-number">3</div>
+            <div><h3>确认节点上线</h3><p>终端出现“Worker 节点ID registered”后保持进程运行，返回本页刷新即可看到在线节点。初始项目清单为空，因此可用项目仍显示 0。</p></div>
+          </div>
+          <details class="worker-credentials">
+            <summary>查看接入凭据</summary>
+            <div class="worker-credential-fields">
+              <label class="field"><span>Worker 令牌</span><span class="deployment-copy-field"><input id="worker-token-value" class="mono" readonly><button class="icon-button" type="button" data-copy-target="worker-token-value" title="复制令牌" aria-label="复制令牌"><i data-lucide="copy"></i></button></span></label>
+              <label class="field"><span>安装包地址</span><span class="deployment-copy-field"><input id="worker-bundle-url" class="mono" readonly><button class="icon-button" type="button" data-copy-target="worker-bundle-url" title="复制地址" aria-label="复制地址"><i data-lucide="copy"></i></button></span></label>
+            </div>
+          </details>
         </div>
       </div>
       <div class="dialog-footer"><button class="button secondary" type="button" data-close-dialog="worker-token-dialog">关闭</button><button class="button primary" type="submit"><i data-lucide="key-round"></i><span>生成令牌</span></button></div>
