@@ -6,3 +6,5 @@ data/
 extension/*.zip
 .monkeycode-daily-state.json
 *.log
+worker.token
+worker-service.json

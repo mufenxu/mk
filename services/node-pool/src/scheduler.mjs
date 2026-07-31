@@ -61,6 +61,7 @@ function eligibleWorkers(state, job, now) {
   return Object.values(state.workers).filter((worker) => {
     if (!workerOnline(worker, now)) return false;
     if (job.preferredWorkerId && worker.id !== job.preferredWorkerId) return false;
+    if (!(worker.projects ?? []).includes(job.project)) return false;
     if (!required.labels.every((label) => worker.labels.includes(label))) return false;
     const activeJobs = state.jobs.filter((entry) => entry.status === "leased" && entry.assignedWorkerId === worker.id).length;
     if (activeJobs >= worker.maxConcurrentJobs) return false;

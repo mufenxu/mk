@@ -1,6 +1,6 @@
 {
   "name": "monkeycode-node-pool",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,9 +9,10 @@
   "scripts": {
     "controller": "node src/controller.mjs",
     "worker": "node src/worker.mjs",
+    "service": "node scripts/worker-service.mjs",
     "token": "node scripts/create-worker-token.mjs",
     "job": "node scripts/submit-job.mjs",
     "status": "node scripts/status.mjs",
-    "check": "node --check src/controller.mjs && node --check src/worker.mjs && node --check src/process-manager.mjs"
+    "check": "node --check src/controller.mjs && node --check src/worker.mjs && node --check src/process-manager.mjs && node --check src/config.mjs && node --check scripts/worker-service.mjs && node --test"
   }
 }

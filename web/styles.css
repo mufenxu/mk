@@ -329,6 +329,10 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .deployment-resource strong, .deployment-resource span { display: block; }
 .deployment-resource span { margin-top: 4px; color: var(--text-soft); font-size: 10px; }
 .deployment-tag { padding: 3px 7px; border-radius: 5px; background: #edf1ef; color: #4d5a55; font-size: 10px; white-space: nowrap; }
+.deployment-services { min-width: 140px; display: grid; justify-items: start; gap: 5px; }
+.deployment-service-link { min-width: 0; display: inline-flex; align-items: center; gap: 5px; color: var(--accent); font-size: 11px; font-weight: 650; }
+.deployment-service-link svg { width: 13px; height: 13px; flex: none; }
+.deployment-service-link span { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .deployment-empty-row td { height: 150px; color: var(--text-soft); text-align: center; }
 .deployment-row-actions { display: flex; justify-content: flex-end; gap: 2px; }
 .deployment-row-actions .icon-button { width: 34px; height: 34px; }

@@ -1,41 +1,15 @@
-import { readFile, statfs } from "node:fs/promises";
+import { statfs } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { loadWorkerConfig } from "./config.mjs";
 import { ProjectManager } from "./process-manager.mjs";
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function cleanConfig(config) {
-  if (config?.version !== 1) throw new Error("Unsupported worker config version");
-  const nodeId = String(config.nodeId ?? "").trim();
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,63}$/.test(nodeId)) throw new Error("Invalid worker node id");
-  const controllerUrl = new URL(config.controllerUrl);
-  if (!["http:", "https:"].includes(controllerUrl.protocol)) throw new Error("Controller URL must use HTTP or HTTPS");
-  if (!config.rootDir || !path.isAbsolute(config.rootDir)) throw new Error("Worker rootDir must be an absolute path");
-  if (!config.projects || typeof config.projects !== "object") throw new Error("Worker projects must be an object");
-  for (const [name, project] of Object.entries(config.projects)) {
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,79}$/.test(name)) throw new Error(`Invalid project name: ${name}`);
-    if (!project.repo || !project.start) throw new Error(`Project ${name} requires repo and start fields`);
-  }
-  return {
-    ...config,
-    nodeId,
-    controllerUrl: controllerUrl.toString().replace(/\/$/, ""),
-    capacity: {
-      cpu: Math.max(0.1, Number(config.capacity?.cpu) || 1),
-      memoryMb: Math.max(128, Math.round(Number(config.capacity?.memoryMb) || 512)),
-      diskMb: Math.max(512, Math.round(Number(config.capacity?.diskMb) || 1024)),
-    },
-    labels: [...new Set((Array.isArray(config.labels) ? config.labels : []).map(String).filter(Boolean))],
-    pollIntervalSeconds: Math.max(1, Number(config.pollIntervalSeconds) || 5),
-    heartbeatIntervalSeconds: Math.max(5, Number(config.heartbeatIntervalSeconds) || 15),
-  };
-}
-
 const configPath = path.resolve(process.env.MK_WORKER_CONFIG ?? process.argv[2] ?? "worker.config.json");
-const config = cleanConfig(JSON.parse(await readFile(configPath, "utf8")));
+const config = await loadWorkerConfig(configPath);
 const token = process.env.MK_WORKER_TOKEN ?? "";
 if (token.length < 32) throw new Error("MK_WORKER_TOKEN is missing or invalid");
 
@@ -44,6 +18,15 @@ await manager.load();
 
 let activeJob = null;
 let stopping = false;
+let nextReconcileAt = 0;
+const startedAt = new Date().toISOString();
+
+const startupRecoveries = await manager.reconcile();
+for (const recovery of startupRecoveries) {
+  if (recovery.status === "running") console.log(`Recovered project ${recovery.project} during Worker startup`);
+  else console.error(`Project recovery failed for ${recovery.project}: ${recovery.error}`);
+}
+nextReconcileAt = Date.now() + config.reconcileIntervalSeconds * 1000;
 
 async function requestApi(route, body) {
   const response = await fetch(`${config.controllerUrl}${route}`, {
@@ -79,6 +62,11 @@ async function nodeSnapshot() {
     projects: Object.keys(config.projects),
     metrics: await metrics(),
     allocations: manager.allocations(),
+    projectStates: manager.projectStates(),
+    agent: {
+      startedAt,
+      supervised: process.env.MK_WORKER_SERVICE === "1",
+    },
     activeJob: activeJob ? { jobId: activeJob.id, leaseToken: activeJob.leaseToken } : null,
   };
 }
@@ -103,6 +91,14 @@ async function complete(job, body) {
 async function runLoop() {
   while (!stopping) {
     try {
+      if (Date.now() >= nextReconcileAt) {
+        const recoveries = await manager.reconcile();
+        for (const recovery of recoveries) {
+          if (recovery.status === "running") console.log(`Recovered project ${recovery.project}`);
+          else console.error(`Project recovery failed for ${recovery.project}: ${recovery.error}`);
+        }
+        nextReconcileAt = Date.now() + config.reconcileIntervalSeconds * 1000;
+      }
       const { job } = await requestApi(`/api/workers/${encodeURIComponent(config.nodeId)}/claim`, {});
       if (!job) {
         await delay(config.pollIntervalSeconds * 1000);
@@ -127,7 +123,15 @@ async function runLoop() {
   }
 }
 
-await register();
+while (!stopping) {
+  try {
+    await register();
+    break;
+  } catch (error) {
+    console.error(`Worker registration failed: ${error.message}`);
+    await delay(Math.max(5000, config.pollIntervalSeconds * 1000));
+  }
+}
 const heartbeatTimer = setInterval(() => {
   heartbeat().catch((error) => console.error(`Heartbeat failed: ${error.message}`));
 }, config.heartbeatIntervalSeconds * 1000);

@@ -716,19 +716,29 @@ function renderDeploymentWorkers() {
     ...(worker.labels ?? []),
     ...(worker.projects ?? []),
     ...(worker.allocations ?? []).map((entry) => entry.project),
+    ...(worker.projectStates ?? []).flatMap((entry) => [entry.project, entry.publicUrl]),
   ].join(" ").toLowerCase().includes(query)).sort((a, b) => Number(b.online) - Number(a.online) || a.id.localeCompare(b.id));
   $("#deployment-workers").innerHTML = workers.length ? workers.map((worker) => {
     const usage = deploymentWorkerUsage(worker);
     const projects = (worker.projects ?? []).map((project) => `<span class="deployment-tag">${escapeHtml(project)}</span>`).join("") || '<span class="muted">等待新版心跳</span>';
-    const allocations = (worker.allocations ?? []).map((entry) => `<span class="deployment-tag">${escapeHtml(entry.project)} · ${escapeHtml(entry.status)}</span>`).join("") || '<span class="muted">无</span>';
+    const states = worker.projectStates?.length ? worker.projectStates : (worker.allocations ?? []).map((entry) => ({ ...entry, desiredStatus: "running" }));
+    const runtimes = states.map((entry) => {
+      const recovering = entry.restartPolicy !== "never" && entry.desiredStatus === "running" && entry.status !== "running";
+      const label = entry.status === "running" ? "运行中" : recovering ? "等待恢复" : entry.status === "not-deployed" ? "未部署" : "已停止";
+      return `<span class="deployment-tag"${entry.lastError ? ` title="${escapeHtml(entry.lastError)}"` : ""}>${escapeHtml(entry.project)} · ${label}</span>`;
+    }).join("") || '<span class="muted">无</span>';
+    const services = states.filter((entry) => entry.publicUrl).map((entry) => entry.status === "running"
+      ? `<a class="deployment-service-link" href="${escapeHtml(entry.publicUrl)}" target="_blank" rel="noopener"><i data-lucide="external-link"></i><span>${escapeHtml(entry.project)}</span></a>`
+      : `<span class="muted">${escapeHtml(entry.project)} · 未运行</span>`).join("") || '<span class="muted">未配置</span>';
+    const agent = worker.agent?.supervised ? "守护运行" : "前台运行";
     return `<tr>
       <td>${deploymentEntity("server", worker.id, (worker.labels ?? []).join(", ") || "无标签")}</td>
-      <td>${deploymentBadge(worker.online ? "online" : "offline", worker.online ? "在线" : "离线")}<div class="deployment-meta">负载 ${deploymentNumber(worker.metrics?.load1, 2)}</div></td>
+      <td>${deploymentBadge(worker.online ? "online" : "offline", worker.online ? "在线" : "离线")}<div class="deployment-meta">${agent} · 负载 ${deploymentNumber(worker.metrics?.load1, 2)}</div></td>
       <td><div class="deployment-resource"><strong>${deploymentNumber(usage.cpu, 1)} / ${deploymentNumber(worker.capacity?.cpu, 1)} CPU</strong><span>${deploymentNumber(usage.memoryMb)} / ${deploymentNumber(worker.capacity?.memoryMb)} MB · 磁盘可用 ${deploymentNumber(worker.metrics?.diskFreeMb)} MB</span></div></td>
-      <td><div class="badge-stack">${projects}</div></td><td><div class="badge-stack">${allocations}</div></td>
+      <td><div class="badge-stack">${projects}</div></td><td><div class="badge-stack">${runtimes}</div></td><td><div class="deployment-services">${services}</div></td>
       <td><strong>${relativeTime(worker.lastSeenAt)}</strong><div class="deployment-meta">${formatDate(worker.lastSeenAt, true)}</div></td>
     </tr>`;
-  }).join("") : deploymentEmptyRow(6, query ? "没有匹配的节点" : (state.nodePool.available === false ? "节点池控制器不可用" : "尚未接入 Worker"));
+  }).join("") : deploymentEmptyRow(7, query ? "没有匹配的节点" : (state.nodePool.available === false ? "节点池控制器不可用" : "尚未接入 Worker"));
 }
 
 function renderDeploymentJobs() {
@@ -798,25 +808,29 @@ function shellValue(value) {
   return `'${String(value).replaceAll("'", `'"'"'`)}'`;
 }
 
-function workerInstallCommand({ nodeId, token, bundleUrl }) {
+function workerInstallCommand({ nodeId, token, bundleUrl, publicUrlTemplate }) {
   const controllerUrl = new URL(bundleUrl);
   controllerUrl.pathname = controllerUrl.pathname.replace(/\/api\/workers\/[^/]+\/bundle\/?$/, "");
   controllerUrl.search = "";
   controllerUrl.hash = "";
   const controller = controllerUrl.toString().replace(/\/$/, "");
   const directory = `.monkeycode-worker-${nodeId}`;
-  return `WORKER_DIR="$HOME/${directory}"
+  return `umask 077
+WORKER_DIR="$HOME/${directory}"
 mkdir -p "$WORKER_DIR"
 cd "$WORKER_DIR"
 export MK_WORKER_TOKEN=${shellValue(token)}
+export MK_PUBLIC_URL_TEMPLATE=${shellValue(publicUrlTemplate ?? "")}
 curl -fL -H "Authorization: Bearer \${MK_WORKER_TOKEN}" ${shellValue(bundleUrl)} -o monkeycode-node-pool.tar.gz
 tar -xzf monkeycode-node-pool.tar.gz
+if [ ! -f worker.config.json ]; then
 cat > worker.config.json <<EOF
 {
   "version": 1,
   "nodeId": ${JSON.stringify(nodeId)},
   "controllerUrl": ${JSON.stringify(controller)},
   "rootDir": "$WORKER_DIR/data",
+  "publicUrlTemplate": ${JSON.stringify(publicUrlTemplate ?? "")},
   "capacity": {
     "cpu": 1,
     "memoryMb": 2048,
@@ -825,11 +839,45 @@ cat > worker.config.json <<EOF
   "labels": ["node"],
   "pollIntervalSeconds": 5,
   "heartbeatIntervalSeconds": 15,
+  "reconcileIntervalSeconds": 15,
+  "recovery": {
+    "initialDelaySeconds": 5,
+    "maxDelaySeconds": 300,
+    "healthFailureThreshold": 3
+  },
   "projects": {}
 }
 EOF
+fi
+node --input-type=module <<'NODE'
+import { readFile, writeFile } from "node:fs/promises";
+const file = "worker.config.json";
+const config = JSON.parse(await readFile(file, "utf8"));
+if (process.env.MK_PUBLIC_URL_TEMPLATE) config.publicUrlTemplate = process.env.MK_PUBLIC_URL_TEMPLATE;
+config.reconcileIntervalSeconds ??= 15;
+config.recovery ??= { initialDelaySeconds: 5, maxDelaySeconds: 300, healthFailureThreshold: 3 };
+await writeFile(file, \`\${JSON.stringify(config, null, 2)}\\n\`, { mode: 0o600 });
+NODE
 export MK_WORKER_CONFIG="$WORKER_DIR/worker.config.json"
-npm run worker`;
+npm run service -- install
+unset MK_WORKER_TOKEN MK_PUBLIC_URL_TEMPLATE
+npm run service -- status`;
+}
+
+function publicUrlTemplateFromSample(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  if (raw.includes("{port}")) {
+    const rendered = new URL(raw.replaceAll("{port}", "39080"));
+    if (!["http:", "https:"].includes(rendered.protocol) || rendered.username || rendered.password || rendered.search || rendered.hash) throw new Error("端口公网地址格式不正确");
+    return raw.replace(/\/+$/, "");
+  }
+  const url = new URL(raw);
+  const match = url.hostname.match(/^\d+-(.+)$/);
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== "/" || !match) {
+    throw new Error("请填写端口开头的完整公网地址");
+  }
+  return `${url.protocol}//{port}-${match[1]}${url.port ? `:${url.port}` : ""}`;
 }
 
 function openDeploymentDetail(jobId) {
@@ -840,6 +888,7 @@ function openDeploymentDetail(jobId) {
     ["任务 ID", job.id], ["状态", deploymentStatusLabels[job.status] ?? job.status], ["Git 引用", job.ref || "-"],
     ["执行节点", job.assignedWorkerId || job.preferredWorkerId || "自动选择"], ["创建时间", formatDate(job.createdAt, true)], ["完成时间", formatDate(job.finishedAt, true)],
   ];
+  if (job.result?.publicUrl) items.push(["公网地址", job.result.publicUrl]);
   $("#deployment-detail-list").innerHTML = items.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("");
   $("#deployment-detail-output").textContent = JSON.stringify(job.error ? { error: job.error } : job.result ?? { message: "暂无执行结果" }, null, 2);
   $("#deployment-detail-dialog").showModal();
@@ -1605,10 +1654,12 @@ $("#worker-token-form").addEventListener("submit", async (event) => {
   const submit = form.querySelector('button[type="submit"]');
   submit.disabled = true;
   try {
-    const result = await api("/api/node-pool/workers/token", { method: "POST", body: { nodeId: new FormData(form).get("nodeId").trim() } });
+    const formData = new FormData(form);
+    const publicUrlTemplate = publicUrlTemplateFromSample(formData.get("publicUrlSample"));
+    const result = await api("/api/node-pool/workers/token", { method: "POST", body: { nodeId: formData.get("nodeId").trim() } });
     $("#worker-token-value").value = result.token;
     $("#worker-bundle-url").value = result.bundleUrl;
-    $("#worker-install-command").value = workerInstallCommand(result);
+    $("#worker-install-command").value = workerInstallCommand({ ...result, publicUrlTemplate });
     $("#worker-token-result").hidden = false;
     icons();
   } catch (error) { toast(error.message, "error"); }

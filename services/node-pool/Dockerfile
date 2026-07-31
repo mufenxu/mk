@@ -9,6 +9,7 @@ COPY scripts ./scripts
 COPY README.md worker.config.example.json ./
 
 FROM source AS test
+COPY test ./test
 RUN npm run check
 
 FROM source AS bundle

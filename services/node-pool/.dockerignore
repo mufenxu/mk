@@ -5,5 +5,6 @@ data
 dist
 node_modules
 worker.config.json
+worker.token
+worker-service.json
 *.log
-

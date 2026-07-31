@@ -97,6 +97,17 @@ function cleanProjects(value) {
     .filter((item) => /^[a-zA-Z0-9][a-zA-Z0-9._-]{1,79}$/.test(item)))].slice(0, 100);
 }
 
+function cleanPublicUrl(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(String(value));
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) return null;
+    return url.toString().slice(0, 2048);
+  } catch {
+    return null;
+  }
+}
+
 function cleanAllocations(value) {
   return (Array.isArray(value) ? value : []).slice(0, 100).map((entry) => ({
     project: String(entry.project ?? "").slice(0, 80),
@@ -104,8 +115,33 @@ function cleanAllocations(value) {
     memoryMb: Math.max(0, Math.round(Number(entry.memoryMb) || 0)),
     pid: Number.isInteger(Number(entry.pid)) ? Number(entry.pid) : null,
     status: String(entry.status ?? "unknown").slice(0, 32),
+    desiredStatus: entry.desiredStatus === "running" ? "running" : "stopped",
     port: Number.isInteger(Number(entry.port)) ? Number(entry.port) : null,
+    publicUrl: cleanPublicUrl(entry.publicUrl),
   })).filter((entry) => entry.project);
+}
+
+function cleanProjectStates(value) {
+  return (Array.isArray(value) ? value : []).slice(0, 100).map((entry) => ({
+    project: String(entry.project ?? "").slice(0, 80),
+    status: ["running", "stopped", "not-deployed"].includes(entry.status) ? entry.status : "stopped",
+    desiredStatus: entry.desiredStatus === "running" ? "running" : "stopped",
+    pid: Number.isInteger(Number(entry.pid)) ? Number(entry.pid) : null,
+    port: Number.isInteger(Number(entry.port)) ? Number(entry.port) : null,
+    publicUrl: cleanPublicUrl(entry.publicUrl),
+    restartPolicy: entry.restartPolicy === "never" ? "never" : "unless-stopped",
+    restartAttempts: Math.max(0, Math.round(Number(entry.restartAttempts) || 0)),
+    nextRestartAt: entry.nextRestartAt ? String(entry.nextRestartAt).slice(0, 40) : null,
+    lastRecoveredAt: entry.lastRecoveredAt ? String(entry.lastRecoveredAt).slice(0, 40) : null,
+    lastError: entry.lastError ? String(entry.lastError).slice(0, 500) : null,
+  })).filter((entry) => entry.project);
+}
+
+function cleanAgent(value = {}) {
+  return {
+    startedAt: value.startedAt ? String(value.startedAt).slice(0, 40) : null,
+    supervised: value.supervised === true,
+  };
 }
 
 function cleanMetrics(value = {}) {
@@ -136,6 +172,8 @@ async function registerWorker(request, response) {
       lastSeenAt: now,
       metrics: cleanMetrics(body.metrics),
       allocations: cleanAllocations(body.allocations),
+      projectStates: cleanProjectStates(body.projectStates),
+      agent: cleanAgent(body.agent),
     };
     return state.workers[nodeId];
   });
@@ -154,6 +192,8 @@ async function heartbeatWorker(request, response, nodeId) {
     if (body.projects !== undefined) current.projects = cleanProjects(body.projects);
     current.metrics = cleanMetrics(body.metrics);
     current.allocations = cleanAllocations(body.allocations);
+    if (body.projectStates !== undefined) current.projectStates = cleanProjectStates(body.projectStates);
+    if (body.agent !== undefined) current.agent = cleanAgent(body.agent);
     const active = body.activeJob;
     if (active?.jobId && active?.leaseToken) {
       const job = state.jobs.find((entry) => entry.id === active.jobId);

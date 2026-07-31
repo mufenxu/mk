@@ -12,10 +12,13 @@ The controller keeps worker and job state, selects an eligible worker from decla
 - Capacity-aware placement by CPU, memory, disk availability, and labels
 - Leased `deploy`, `start`, `stop`, and `restart` jobs
 - Managed Git checkout, build, process startup, local health checks, and logs
+- Desired-state recovery after process exits or repeated health-check failures
+- Background Worker supervision with persisted per-node credentials
+- Public application URL reporting from Worker or project URL templates
 - Per-worker authenticated bundle download for repeatable node onboarding
 - Management APIs for workers, resource status, job submission, cancellation, and Worker token generation
 
-This phase does not install FRP, configure Nginx, or deploy to a real VPS.
+MonkeyCode environments that expose ports through public HTTPS do not require FRP for application traffic. Configure `publicUrlTemplate` with a `{port}` placeholder or set a project-specific `publicUrl`.
 Deployments stop the existing process before updating its managed checkout, so this first phase has a short deployment outage and no automatic rollback.
 
 ## Docker controller deployment
@@ -49,15 +52,16 @@ export MK_WORKER_SECRET="the-controller-worker-secret"
 npm run token -- monkey-env-01
 ```
 
-Set the resulting token only on that worker and start it:
+Install the background service with the per-node token:
 
 ```bash
 export MK_WORKER_TOKEN="the-derived-worker-token"
 export MK_WORKER_CONFIG=/workspace/worker.config.json
-npm run worker
+npm run service -- install
+npm run service -- status
 ```
 
-The worker stores managed repositories, runtime state, and logs below its configured `rootDir`.
+The service stores the scoped Worker token in `worker.token` with mode `0600`, survives terminal closure, and restarts the Worker after unexpected exits. Use `npm run service -- restart`, `stop`, or `start` for maintenance. When the Worker starts again, projects whose desired state is `running` are restored from the runtime state below `rootDir`. A complete environment replacement still requires the service installation command to be run again.
 
 ## Submit work
 
@@ -79,4 +83,5 @@ The controller selects the healthiest eligible worker. `--worker node-id` can pi
 - Treat worker checkouts and build outputs as replaceable cache.
 - Do not expose a worker repository root through an HTTP file server.
 - Run the controller only behind HTTPS and keep its state file private.
-- A later phase should add FRP tunnels, Nginx upstream updates, supervised worker startup, and automated rollback.
+- Public URLs are only advertised when explicitly configured; the Worker never guesses an environment identifier.
+- A later phase should add zero-downtime deployment and automated rollback.
