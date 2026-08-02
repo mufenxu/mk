@@ -46,12 +46,14 @@ export class StateStore {
     return structuredClone(reader(this.state));
   }
 
-  async mutate(mutator) {
+  async mutate(mutator, { persist = true } = {}) {
     let result;
     const operation = this.serial.then(async () => {
       result = await mutator(this.state);
-      this.state.updatedAt = new Date().toISOString();
-      await this.save();
+      if (typeof persist === "function" ? persist(result) : persist) {
+        this.state.updatedAt = new Date().toISOString();
+        await this.save();
+      }
     });
     this.serial = operation.catch(() => {});
     await operation;

@@ -10,6 +10,7 @@ import {
   claimForWorker,
   normalizeCapacity,
   normalizeRequirements,
+  pruneTerminalJobs,
   publicJob,
   requeueExpiredLeases,
   workerOnline,
@@ -20,6 +21,8 @@ const port = Number(process.env.MK_CONTROLLER_PORT ?? 4191);
 const stateFile = process.env.MK_STATE_FILE ?? path.resolve("data/state.json");
 const workerBundleFile = process.env.MK_WORKER_BUNDLE_FILE ? path.resolve(process.env.MK_WORKER_BUNDLE_FILE) : null;
 const adminToken = process.env.MK_ADMIN_TOKEN ?? "";
+const terminalJobRetentionMs = 30 * 86_400_000;
+const maxTerminalJobs = 1_000;
 const workerSecret = process.env.MK_WORKER_SECRET ?? "";
 const managementUrl = process.env.MK_MANAGEMENT_URL?.trim() || null;
 
@@ -194,38 +197,55 @@ async function heartbeatWorker(request, response, nodeId) {
   await requireWorker(request, nodeId);
   const body = await readJson(request);
   const now = Date.now();
-  const worker = await store.mutate((state) => {
+  const result = await store.mutate((state) => {
     const current = state.workers[nodeId];
     if (!current) throw httpError(404, "Worker is not registered");
+    let durableChange = false;
+    if (current.status !== "online") durableChange = true;
     current.status = "online";
     current.lastSeenAt = new Date(now).toISOString();
-    if (body.projects !== undefined) current.projects = cleanProjects(body.projects);
+    if (body.projects !== undefined) {
+      const projects = cleanProjects(body.projects);
+      if (JSON.stringify(current.projects) !== JSON.stringify(projects)) durableChange = true;
+      current.projects = projects;
+    }
     current.metrics = cleanMetrics(body.metrics);
     current.allocations = cleanAllocations(body.allocations);
-    if (body.projectStates !== undefined) current.projectStates = cleanProjectStates(body.projectStates);
-    if (body.agent !== undefined) current.agent = cleanAgent(body.agent);
+    if (body.projectStates !== undefined) {
+      const projectStates = cleanProjectStates(body.projectStates);
+      if (JSON.stringify(current.projectStates) !== JSON.stringify(projectStates)) durableChange = true;
+      current.projectStates = projectStates;
+    }
+    if (body.agent !== undefined) {
+      const agent = cleanAgent(body.agent);
+      if (JSON.stringify(current.agent) !== JSON.stringify(agent)) durableChange = true;
+      current.agent = agent;
+    }
     const active = body.activeJob;
     if (active?.jobId && active?.leaseToken) {
       const job = state.jobs.find((entry) => entry.id === active.jobId);
       if (job?.status === "leased" && job.assignedWorkerId === nodeId && secureEqual(job.leaseToken, active.leaseToken)) {
         job.leaseExpiresAt = new Date(now + job.leaseSeconds * 1000).toISOString();
+        durableChange = true;
       }
     }
-    return current;
-  });
-  sendJson(response, 200, { worker });
+    return { worker: current, durableChange };
+  }, { persist: (value) => value.durableChange });
+  sendJson(response, 200, { worker: result.worker });
 }
 
 async function claimJob(request, response, nodeId) {
   await requireWorker(request, nodeId);
   await readJson(request);
-  const job = await store.mutate((state) => {
+  const result = await store.mutate((state) => {
     if (!state.workers[nodeId]) throw httpError(404, "Worker is not registered");
     state.workers[nodeId].lastSeenAt = new Date().toISOString();
     state.workers[nodeId].status = "online";
-    return claimForWorker(state, nodeId);
-  });
-  sendJson(response, 200, { job });
+    const pruned = pruneTerminalJobs(state, { retentionMs: terminalJobRetentionMs, maxEntries: maxTerminalJobs });
+    const claimed = claimForWorker(state, nodeId);
+    return { ...claimed, changed: claimed.changed || pruned };
+  }, { persist: (value) => value.changed });
+  sendJson(response, 200, { job: result.job });
 }
 
 async function createJob(request, response) {
@@ -344,10 +364,12 @@ async function completeJob(request, response, jobId) {
 
 async function listStatus(request, response) {
   requireAdmin(request);
-  const state = await store.mutate((current) => {
-    requeueExpiredLeases(current);
-    return current;
-  });
+  const result = await store.mutate((current) => {
+    const requeued = requeueExpiredLeases(current);
+    const pruned = pruneTerminalJobs(current, { retentionMs: terminalJobRetentionMs, maxEntries: maxTerminalJobs });
+    return { state: current, changed: requeued || pruned };
+  }, { persist: (value) => value.changed });
+  const state = result.state;
   const now = Date.now();
   const workers = Object.values(state.workers).map((worker) => ({
     ...worker,

@@ -270,28 +270,29 @@ function environmentKeeperHtml(task, isNew) {
 }
 
 async function loadData() {
-  const [overview, accounts, tasks, settings, logs, backups, nodePool] = await Promise.all([
-    api("/api/overview"),
-    api("/api/accounts"),
-    api("/api/tasks"),
-    api("/api/settings"),
-    api("/api/logs?limit=500"),
-    state.page === "settings" ? api("/api/backups") : Promise.resolve({ backups: state.backups }),
-    api("/api/node-pool/overview").catch((error) => ({
+  const page = state.page;
+  const needsSettings = !state.settings || ["accounts", "settings"].includes(page);
+  const logLimit = page === "history" ? 500 : page === "tasks" ? 100 : 0;
+  const [overview, settings, logs, backups, nodePool] = await Promise.all([
+    api(`/api/overview?activity=${page === "overview" ? "1" : "0"}`),
+    needsSettings ? api("/api/settings") : Promise.resolve(state.settings),
+    logLimit ? api(`/api/logs?limit=${logLimit}`) : Promise.resolve(null),
+    page === "settings" ? api("/api/backups") : Promise.resolve(null),
+    page === "deployments" ? api("/api/node-pool/overview").catch((error) => ({
       available: false,
       workers: [],
       jobs: [],
       jobCounts: {},
       error: error.message,
-    })),
+    })) : Promise.resolve(null),
   ]);
   state.overview = overview;
-  state.accounts = accounts.accounts;
-  state.tasks = tasks.tasks;
+  state.accounts = overview.accounts;
+  state.tasks = overview.tasks;
   state.settings = settings;
-  state.logs = logs.logs;
-  state.backups = backups.backups;
-  state.nodePool = nodePool;
+  if (logs) state.logs = logs.logs;
+  if (backups) state.backups = backups.backups;
+  if (nodePool) state.nodePool = nodePool;
   if (state.selectedTaskId && !state.tasks.some((task) => task.id === state.selectedTaskId)) {
     state.selectedTaskId = null;
     state.taskFormDirty = false;
@@ -299,21 +300,25 @@ async function loadData() {
   $("#nav-task-count").textContent = state.tasks.length;
   $("#nav-account-count").textContent = state.accounts.length;
   $("#nav-remote-count").textContent = allRemoteTasks().length;
-  $("#nav-deployment-count").textContent = (nodePool.jobCounts?.queued ?? 0) + (nodePool.jobCounts?.leased ?? 0);
+  $("#nav-deployment-count").textContent = (state.nodePool.jobCounts?.queued ?? 0) + (state.nodePool.jobCounts?.leased ?? 0);
   $("#last-refresh").textContent = `更新于 ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
-  renderAll();
+  renderCurrentPage();
 }
 
-function renderAll() {
-  renderOverview();
-  renderTaskList();
-  if (!state.taskFormDirty || !$("#task-form")) renderTaskEditor();
-  renderRemoteTasks();
-  renderAccounts();
-  renderDeployments();
-  renderHistoryFilters();
-  renderHistory();
-  if (!state.settingsFormDirty) renderSettings();
+function renderCurrentPage() {
+  if (state.page === "overview") renderOverview();
+  if (state.page === "tasks") {
+    renderTaskList();
+    if (!state.taskFormDirty || !$("#task-form")) renderTaskEditor();
+  }
+  if (state.page === "remote") renderRemoteTasks();
+  if (state.page === "accounts") renderAccounts();
+  if (state.page === "deployments") renderDeployments();
+  if (state.page === "history") {
+    renderHistoryFilters();
+    renderHistory();
+  }
+  if (state.page === "settings" && !state.settingsFormDirty) renderSettings();
   if ($("#browser-bridge-dialog")?.open) renderBrowserBridgeDialog();
   icons();
 }
@@ -1245,13 +1250,6 @@ function showPage(page) {
   $("#page-eyebrow").textContent = eyebrow;
   if (location.hash !== `#${page}`) history.replaceState(null, "", `#${page}`);
   const primary = $("#primary-action");
-  if (page === "settings") {
-    api("/api/backups").then((response) => {
-      state.backups = response.backups;
-      renderBackups();
-      icons();
-    }).catch((error) => toast(error.message, "error"));
-  }
   if (page === "overview" || page === "tasks") {
     primary.hidden = false;
     primary.title = "新建任务";
@@ -1340,7 +1338,10 @@ function downloadBlob(blob, filename) {
 
 document.addEventListener("click", async (event) => {
   const nav = event.target.closest("[data-page], [data-page-link]");
-  if (nav) showPage(nav.dataset.page || nav.dataset.pageLink);
+  if (nav) {
+    showPage(nav.dataset.page || nav.dataset.pageLink);
+    loadData().catch((error) => toast(error.message, "error"));
+  }
 
   const deploymentView = event.target.closest("[data-deployment-view]");
   if (deploymentView) setDeploymentView(deploymentView.dataset.deploymentView);
@@ -1613,9 +1614,9 @@ $("#login-form").addEventListener("submit", async (event) => {
     const response = await api("/api/auth/login", { method: "POST", body: { password: $("#login-password").value } });
     state.csrf = response.csrf;
     showApp();
-    await loadData();
     const targetPage = location.hash.slice(1);
     showPage(pageMeta[targetPage] ? targetPage : "overview");
+    await loadData();
   } catch (error) { $("#login-error").textContent = error.message === "invalid-password" ? "密码错误" : error.message; }
 });
 
@@ -1828,9 +1829,9 @@ async function boot() {
     if (!auth.authenticated) { showLogin(); return; }
     state.csrf = auth.csrf;
     showApp();
-    await loadData();
     const initialPage = location.hash.slice(1);
     showPage(pageMeta[initialPage] ? initialPage : "overview");
+    await loadData();
   } catch (error) {
     showLogin();
     $("#login-error").textContent = error.message;
@@ -1838,7 +1839,7 @@ async function boot() {
 }
 
 setInterval(() => {
-  if (!$("#app").hidden) loadData().catch(() => {});
+  if (!$("#app").hidden && !document.hidden) loadData().catch(() => {});
 }, 20_000);
 
 boot();

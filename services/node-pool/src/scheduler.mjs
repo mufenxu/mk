@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 export const WORKER_STALE_MS = 45_000;
 
+const terminalJobStatuses = new Set(["completed", "failed", "cancelled"]);
+
 function finite(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -24,6 +26,7 @@ export function normalizeRequirements(input = {}) {
 }
 
 export function requeueExpiredLeases(state, now = Date.now()) {
+  let changed = false;
   for (const job of state.jobs) {
     if (job.status !== "leased" || new Date(job.leaseExpiresAt).getTime() > now) continue;
     if (job.attempts >= job.maxAttempts) {
@@ -37,7 +40,30 @@ export function requeueExpiredLeases(state, now = Date.now()) {
       job.leaseExpiresAt = null;
       job.error = "Previous worker lease expired";
     }
+    changed = true;
   }
+  return changed;
+}
+
+export function pruneTerminalJobs(state, {
+  now = Date.now(),
+  retentionMs = 30 * 86_400_000,
+  maxEntries = 1_000,
+} = {}) {
+  const cutoff = now - retentionMs;
+  const terminal = state.jobs.filter((job) => terminalJobStatuses.has(job.status));
+  const retained = terminal
+    .filter((job) => {
+      const finishedAt = new Date(job.finishedAt ?? "").getTime();
+      return !Number.isFinite(finishedAt) || finishedAt >= cutoff;
+    })
+    .sort((left, right) => new Date(right.finishedAt ?? 0).getTime() - new Date(left.finishedAt ?? 0).getTime())
+    .slice(0, maxEntries);
+  const retainedIds = new Set(retained.map((job) => job.id));
+  const jobs = state.jobs.filter((job) => !terminalJobStatuses.has(job.status) || retainedIds.has(job.id));
+  if (jobs.length === state.jobs.length) return false;
+  state.jobs = jobs;
+  return true;
 }
 
 export function workerOnline(worker, now = Date.now()) {
@@ -89,7 +115,7 @@ export function selectWorker(state, job, now = Date.now()) {
 }
 
 export function claimForWorker(state, workerId, now = Date.now()) {
-  requeueExpiredLeases(state, now);
+  const requeued = requeueExpiredLeases(state, now);
   const jobs = state.jobs
     .filter((job) => job.status === "queued")
     .sort((left, right) => right.priority - left.priority || left.createdAt.localeCompare(right.createdAt));
@@ -104,9 +130,9 @@ export function claimForWorker(state, workerId, now = Date.now()) {
     job.attempts += 1;
     job.startedAt ??= new Date(now).toISOString();
     state.workers[workerId].lastAssignedAt = new Date(now).toISOString();
-    return job;
+    return { job, changed: true };
   }
-  return null;
+  return { job: null, changed: requeued };
 }
 
 export function publicJob(job) {

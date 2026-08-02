@@ -348,3 +348,40 @@ test("an enabled task requires an account with a configured cookie", async () =>
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("overview can skip activity logs when the active page does not need them", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "monkeycode-panel-overview-"));
+  const store = await new DataStore(directory, randomBytes(32)).init();
+  const notifications = new NotificationService(store);
+  const runner = new TaskRunner(store, notifications);
+  const panel = new PanelServer({
+    store,
+    notifications,
+    runner,
+    password: "correct horse battery staple",
+    host: "127.0.0.1",
+    port: 0,
+    secureCookie: false,
+  });
+  const address = await panel.listen();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    await store.appendLog({ type: "task-run", status: "sent", detail: "recent activity" });
+    const login = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "correct horse battery staple" }),
+    });
+    const cookie = login.headers.get("set-cookie").split(";", 1)[0];
+
+    const lightweight = await fetch(`${baseUrl}/api/overview?activity=0`, { headers: { Cookie: cookie } });
+    assert.deepEqual((await lightweight.json()).logs, []);
+
+    const detailed = await fetch(`${baseUrl}/api/overview?activity=1`, { headers: { Cookie: cookie } });
+    assert.equal((await detailed.json()).logs.length, 1);
+  } finally {
+    await panel.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

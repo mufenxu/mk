@@ -281,7 +281,8 @@ export class PanelServer {
       if (url.pathname === "/api/overview" && request.method === "GET") {
         const config = this.store.getPublicConfig();
         const tasks = config.tasks.map((task) => this.taskSummary(task));
-        const recentLogs = await this.store.readLogs({ limit: 1000 });
+        const includeActivity = url.searchParams.get("activity") !== "0";
+        const recentLogs = includeActivity ? await this.store.readLogs({ limit: 1000 }) : [];
         const statsSince = Date.now() - 7 * 86_400_000;
         const completedRuns = recentLogs.filter((entry) => (
           entry.type === "task-run"
@@ -305,14 +306,14 @@ export class PanelServer {
           running: this.runner.getRunning(),
           queue: this.runner.getQueue(),
           logs: recentLogs.slice(0, 8),
-          runStats: {
+          runStats: includeActivity ? {
             days: 7,
             total: completedRuns.length,
             successful: successfulRuns.length,
             failed: failedRuns.length,
             successRate: completedRuns.length ? Math.round(successfulRuns.length / completedRuns.length * 100) : null,
             lastSuccessAt: successfulRuns[0]?.at ?? null,
-          },
+          } : null,
           system: {
             node: process.version,
             uptimeSeconds: Math.round(process.uptime()),
