@@ -94,13 +94,13 @@ jobs:
           trap cleanup EXIT
           docker run --detach \
             --name monkeycode-node-pool-smoke \
-            --publish 127.0.0.1:4190:4191 \
+            --publish 127.0.0.1:4191:4191 \
             --env MK_ADMIN_TOKEN=smoke-test-admin-token-1234567890 \
             --env MK_WORKER_SECRET=smoke-test-worker-secret-12345678901234567890 \
             "${NODE_POOL_SOURCE_IMAGE}"
           for attempt in {1..20}; do
-            if curl --fail --silent --show-error http://127.0.0.1:4190/readyz; then
-              SMOKE_ADMIN_TOKEN=smoke-test-admin-token-1234567890 node services/node-pool/scripts/smoke-controller.mjs http://127.0.0.1:4190
+            if curl --fail --silent --show-error http://127.0.0.1:4191/readyz; then
+              SMOKE_ADMIN_TOKEN=smoke-test-admin-token-1234567890 node services/node-pool/scripts/smoke-controller.mjs http://127.0.0.1:4191
               exit 0
             fi
             sleep 1
