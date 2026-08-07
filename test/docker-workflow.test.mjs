@@ -14,12 +14,13 @@ test("Node Pool image smoke uses a Fetch-compatible host port", async () => {
   assert.match(workflow, /smoke-controller\.mjs http:\/\/127\.0\.0\.1:4191/);
 });
 
-test("Docker test stage includes the workflow used by its tests", async () => {
+test("Docker test stage receives the repository fixtures used by its tests", async () => {
   const [dockerfile, dockerignore] = await Promise.all([
     readFile(dockerfilePath, "utf8"),
     readFile(dockerignorePath, "utf8"),
   ]);
 
-  assert.match(dockerfile, /COPY \.github\/workflows\/docker\.yml \.\/\.github\/workflows\/docker\.yml/);
+  assert.match(dockerfile, /FROM dependencies AS test[\s\S]*COPY \. \.[\s\S]*RUN npm test/);
+  assert.match(dockerignore, /^\.env\*$/m);
   assert.doesNotMatch(dockerignore, /^\.github\/?$/m);
 });
