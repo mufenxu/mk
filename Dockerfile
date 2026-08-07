@@ -13,6 +13,7 @@ COPY web ./web
 COPY scripts ./scripts
 COPY extension ./extension
 COPY test ./test
+COPY .github/workflows/docker.yml ./.github/workflows/docker.yml
 RUN npm test
 
 FROM node:22-bookworm-slim AS production-dependencies
