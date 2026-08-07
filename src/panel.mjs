@@ -8,6 +8,7 @@ import { EnvironmentKeeper } from "./environment-keeper.mjs";
 import { ConfigError } from "./errors.mjs";
 import { NotificationService } from "./notifications.mjs";
 import { NodePoolClient } from "./node-pool.mjs";
+import { NodePoolMonitor } from "./node-pool-monitor.mjs";
 import { RemoteSyncService } from "./remote-sync.mjs";
 import { TaskRunner } from "./runner.mjs";
 import { parseMasterKey } from "./security.mjs";
@@ -54,18 +55,21 @@ try {
     adminToken: config.nodePoolAdminToken,
     publicUrl: config.nodePoolPublicUrl,
   }) : null;
+  const nodePoolMonitor = nodePool ? new NodePoolMonitor({ nodePool, notifications }) : null;
   const server = new PanelServer({ ...config, store, notifications, runner, browserBridge, remoteSync, environmentKeeper, autoLogin, nodePool });
   await environmentKeeper.start();
   const address = await server.listen();
   autoLogin.start();
   runner.startScheduler();
   remoteSync.start();
+  nodePoolMonitor?.start();
   console.log(`MonkeyCode control panel listening on http://${address.address}:${address.port}`);
 
   const shutdown = async () => {
     runner.stopScheduler();
     autoLogin.stop();
     remoteSync.stop();
+    nodePoolMonitor?.stop();
     environmentKeeper.stop();
     await server.close();
     process.exit(0);

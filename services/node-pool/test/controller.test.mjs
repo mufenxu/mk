@@ -64,6 +64,16 @@ test("worker heartbeats update memory without rewriting durable controller state
 
   try {
     await waitForHealthy(baseUrl);
+    const ready = await request(baseUrl, "/readyz");
+    assert.equal(ready.response.status, 200);
+    assert.deepEqual(ready.body, {
+      status: "ready",
+      state: {
+        workerCounts: { total: 0, online: 0, offline: 0 },
+        jobCounts: { queued: 0, leased: 0, completed: 0, failed: 0, cancelled: 0 },
+        oldestQueuedAt: null,
+      },
+    });
     const issued = await request(baseUrl, "/api/workers/token", { token: adminToken, body: { nodeId: "worker-01" } });
     assert.equal(issued.response.status, 200);
     const workerToken = issued.body.token;

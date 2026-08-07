@@ -1,25 +1,16 @@
 import { createServer } from "node:http";
-import { readFile, statfs } from "node:fs/promises";
+import { statfs } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isExtensionOrigin } from "./browser-bridge.mjs";
 import { AuthExpiredError, BridgeError, ConfigError, NodePoolError, RemoteError } from "./errors.mjs";
 import { createToken, verifyPassword } from "./security.mjs";
+import { StaticAssets } from "./static-assets.mjs";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.resolve(moduleDir, "..", "web");
-const lucideFile = path.resolve(moduleDir, "..", "node_modules", "lucide", "dist", "umd", "lucide.js");
 const SESSION_COOKIE = "monkeycode_panel_session";
-
-const staticFiles = new Map([
-  ["/", { file: path.join(webDir, "index.html"), type: "text/html; charset=utf-8" }],
-  ["/index.html", { file: path.join(webDir, "index.html"), type: "text/html; charset=utf-8" }],
-  ["/styles.css", { file: path.join(webDir, "styles.css"), type: "text/css; charset=utf-8" }],
-  ["/app.js", { file: path.join(webDir, "app.js"), type: "text/javascript; charset=utf-8" }],
-  ["/vendor/lucide.js", { file: lucideFile, type: "text/javascript; charset=utf-8" }],
-  ["/favicon.svg", { file: path.join(webDir, "favicon.svg"), type: "image/svg+xml" }],
-]);
 
 function json(response, status, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
@@ -92,6 +83,7 @@ export class PanelServer {
     this.environmentKeeper = options.environmentKeeper ?? null;
     this.autoLogin = options.autoLogin ?? null;
     this.nodePool = options.nodePool ?? null;
+    this.staticAssets = new StaticAssets(webDir);
     this.sessions = new Map();
     this.loginAttempts = new Map();
     this.server = createServer((request, response) => this.handle(request, response));
@@ -141,23 +133,6 @@ export class PanelServer {
     this.loginAttempts.set(address, attempts);
   }
 
-  async serveStatic(pathname, response) {
-    const asset = staticFiles.get(pathname);
-    if (!asset) return false;
-    try {
-      const content = await readFile(asset.file);
-      response.writeHead(200, {
-        "Content-Type": asset.type,
-        "Content-Length": content.length,
-        "Cache-Control": pathname.startsWith("/vendor/") ? "public, max-age=86400" : "no-cache",
-      });
-      response.end(content);
-    } catch {
-      json(response, 404, { error: "asset-not-found" });
-    }
-    return true;
-  }
-
   async handle(request, response) {
     securityHeaders(response);
     const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
@@ -173,13 +148,21 @@ export class PanelServer {
         return;
       }
       if (!url.pathname.startsWith("/api/")) {
-        if (await this.serveStatic(url.pathname, response)) return;
+        if (await this.staticAssets.serve(request, response, url.pathname)) return;
         json(response, 404, { error: "not-found" });
         return;
       }
 
       if (url.pathname === "/api/health" && request.method === "GET") {
         json(response, 200, { ok: true });
+        return;
+      }
+      if (url.pathname === "/api/readyz" && request.method === "GET") {
+        try {
+          json(response, 200, { ok: true, storage: await this.store.readiness() });
+        } catch {
+          json(response, 503, { ok: false, error: "storage-unavailable" });
+        }
         return;
       }
 

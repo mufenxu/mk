@@ -25,6 +25,10 @@ test("worker config resolves project public URLs and recovery defaults", () => {
   const config = cleanWorkerConfig(workerConfig());
   assert.equal(projectPublicUrl(config, config.projects.api), "https://3000-environment.example.test");
   assert.equal(config.projects.api.restartPolicy, "unless-stopped");
+  assert.deepEqual(config.resourceControl, {
+    mode: "auto",
+    maxProcesses: 128,
+  });
   assert.equal(config.reconcileIntervalSeconds, 15);
   assert.equal(config.recovery.healthFailureThreshold, 3);
 });
@@ -38,4 +42,13 @@ test("project public URL overrides the worker template", () => {
 
 test("public URL templates must contain a port placeholder", () => {
   assert.throws(() => cleanWorkerConfig(workerConfig({ publicUrlTemplate: "https://environment.example.test" })), /must contain \{port\}/);
+});
+
+test("worker resource control accepts explicit enforcement and validates its mode", () => {
+  const config = cleanWorkerConfig(workerConfig({ resourceControl: { mode: "required", maxProcesses: 32 } }));
+  assert.deepEqual(config.resourceControl, { mode: "required", maxProcesses: 32 });
+  assert.throws(
+    () => cleanWorkerConfig(workerConfig({ resourceControl: { mode: "unknown" } })),
+    /resource control mode/i,
+  );
 });

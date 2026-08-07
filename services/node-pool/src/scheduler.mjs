@@ -70,6 +70,29 @@ export function workerOnline(worker, now = Date.now()) {
   return worker?.status === "online" && now - new Date(worker.lastSeenAt).getTime() <= WORKER_STALE_MS;
 }
 
+export function summarizeState(state, now = Date.now()) {
+  const workers = Object.values(state.workers ?? {});
+  const online = workers.filter((worker) => workerOnline(worker, now)).length;
+  const jobCounts = Object.fromEntries(["queued", "leased", "completed", "failed", "cancelled"].map((status) => [
+    status,
+    (state.jobs ?? []).filter((job) => job.status === status).length,
+  ]));
+  const oldestQueuedAt = (state.jobs ?? [])
+    .filter((job) => job.status === "queued" && job.createdAt)
+    .map((job) => job.createdAt)
+    .sort()[0] ?? null;
+  return {
+    updatedAt: state.updatedAt,
+    workerCounts: {
+      total: workers.length,
+      online,
+      offline: workers.length - online,
+    },
+    jobCounts,
+    oldestQueuedAt,
+  };
+}
+
 function allocationsFor(worker, project) {
   return (worker.allocations ?? []).filter((entry) => entry.project !== project);
 }

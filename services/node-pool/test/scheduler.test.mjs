@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { pruneTerminalJobs, selectWorker } from "../src/scheduler.mjs";
+import { pruneTerminalJobs, selectWorker, summarizeState } from "../src/scheduler.mjs";
 
 function worker(id, projects) {
   return {
@@ -47,4 +47,28 @@ test("terminal job retention removes expired history without touching queued or 
 
   assert.equal(pruneTerminalJobs(state, { now, retentionMs: 7 * 86_400_000, maxEntries: 100 }), true);
   assert.deepEqual(state.jobs.map((job) => job.id), ["recent", "queued", "leased"]);
+});
+
+test("state summary reports worker availability and deployment backlog", () => {
+  const now = new Date("2026-08-07T12:00:00.000Z").getTime();
+  const current = worker("current", ["api"]);
+  current.lastSeenAt = new Date(now - 10_000).toISOString();
+  const stale = worker("stale", ["api"]);
+  stale.lastSeenAt = new Date(now - 120_000).toISOString();
+  const state = {
+    updatedAt: "2026-08-07T11:59:00.000Z",
+    workers: { current, stale },
+    jobs: [
+      { status: "queued", createdAt: "2026-08-07T11:55:00.000Z" },
+      { status: "leased", createdAt: "2026-08-07T11:56:00.000Z" },
+      { status: "failed", createdAt: "2026-08-07T11:57:00.000Z" },
+    ],
+  };
+
+  assert.deepEqual(summarizeState(state, now), {
+    updatedAt: state.updatedAt,
+    workerCounts: { total: 2, online: 1, offline: 1 },
+    jobCounts: { queued: 1, leased: 1, completed: 0, failed: 1, cancelled: 0 },
+    oldestQueuedAt: "2026-08-07T11:55:00.000Z",
+  });
 });

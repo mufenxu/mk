@@ -19,7 +19,9 @@ The controller keeps worker and job state, selects an eligible worker from decla
 - Management APIs for workers, resource status, job submission, cancellation, and Worker token generation
 
 MonkeyCode environments that expose ports through public HTTPS do not require FRP for application traffic. Configure `publicUrlTemplate` with a `{port}` placeholder or set a project-specific `publicUrl`.
-Deployments stop the existing process before updating its managed checkout, so this first phase has a short deployment outage and no automatic rollback.
+Deployments stop the existing process before updating its managed checkout, so there is still a short deployment outage. If checkout, install, build, startup, or health verification fails, the Worker restores the previous commit and its prior running state. Zero-downtime switching is not implemented yet.
+
+On Linux, `resourceControl.mode` defaults to `auto`. The Worker uses a transient `systemd --user` scope when available to enforce each project's declared CPU, memory, and process limits, and reports `none` when the environment cannot provide that isolation. Set the mode to `required` to refuse startup without enforcement, or `off` to disable probing explicitly.
 
 ## Docker controller deployment
 
@@ -84,4 +86,4 @@ The controller selects the healthiest eligible worker. `--worker node-id` can pi
 - Do not expose a worker repository root through an HTTP file server.
 - Run the controller only behind HTTPS and keep its state file private.
 - Public URLs are only advertised when explicitly configured; the Worker never guesses an environment identifier.
-- A later phase should add zero-downtime deployment and automated rollback.
+- A later phase should add zero-downtime deployment through a stable local proxy and parallel release ports.

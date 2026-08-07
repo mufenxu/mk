@@ -27,96 +27,15 @@ const state = {
   settingsFormDirty: false,
 };
 
-const pageMeta = {
-  overview: ["运行概览", "系统状态与下一次计划"],
-  tasks: ["任务管理", "配置发送内容、账号与日程"],
-  remote: ["远端任务", "账号任务、模型用量与环境状态"],
-  accounts: ["账号管理", "集中维护 MonkeyCode 登录凭证"],
-  deployments: ["项目部署", "跨 MonkeyCode 环境调度普通项目"],
-  history: ["执行记录", "查看每次调度与通知结果"],
-  settings: ["系统设置", "全局调度、通知与备份"],
-};
-
-const statusLabels = {
-  sent: "发送成功",
-  accepted: "消息已接收",
-  completed: "远端已完成",
-  "completion-timeout": "完成确认超时",
-  "auto-paused": "连续失败已暂停",
-  duplicate: "重复跳过",
-  "dry-run": "模拟运行",
-  "auth-expired": "登录失效",
-  "session-warning": "凭证即将到期",
-  failed: "执行失败",
-  valid: "有效",
-  invalid: "无效",
-  missing: "未配置",
-  expired: "已过期",
-  expiring: "即将到期",
-  unknown: "待验证",
-  connected: "已连接",
-  connecting: "正在连接",
-  reconnecting: "正在重连",
-  starting: "准备连接",
-  paused: "已暂停",
-  off: "已关闭",
-  "account-mismatch": "账号不匹配",
-  running: "运行中",
-  queued: "排队中",
-  cancelled: "已取消",
-  "quota-blocked": "额度保护已阻止",
-  processing: "运行中",
-  pending: "等待中",
-  finished: "已完成",
-  error: "异常",
-  synced: "已同步",
-  stale: "待同步",
-  never: "未同步",
-  "quota-low": "额度不足",
-  "remote-task-error": "远端任务异常",
-  "environment-hibernated": "环境已休眠",
-  "remote-task-missing": "远端任务未找到",
-  "sync-failed": "同步失败",
-};
-
-const notificationLabels = {
-  generic: "通用 Webhook",
-  wecom: "企业微信",
-  dingtalk: "钉钉",
-  pxyb: "PXYB 微信通知",
-  telegram: "Telegram",
-  bark: "Bark",
-  email: "电子邮件",
-};
-
-const notificationEventLabels = {
-  sent: "发送成功",
-  completed: "远端完成",
-  "completion-timeout": "完成确认超时",
-  "auto-paused": "连续失败暂停",
-  failed: "发送失败",
-  "auth-expired": "登录失效",
-  "session-warning": "凭证即将到期",
-  "auto-login-failed": "自动续期失败",
-  "auto-login-recovered": "自动续期已恢复",
-  duplicate: "重复跳过",
-  "quota-low": "额度不足",
-  "remote-task-error": "远端异常",
-  "environment-hibernated": "环境休眠",
-  "remote-task-missing": "任务丢失",
-  "sync-failed": "同步失败",
-};
-
-const deploymentStatusLabels = {
-  queued: "排队",
-  leased: "执行中",
-  completed: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
-};
-
-const deploymentTypeLabels = { deploy: "部署", start: "启动", stop: "停止", restart: "重启" };
-const deploymentTypeIcons = { deploy: "rocket", start: "play", stop: "square", restart: "rotate-cw" };
+const {
+  pageMeta,
+  statusLabels,
+  notificationLabels,
+  notificationEventLabels,
+  deploymentStatusLabels,
+  deploymentTypeLabels,
+  deploymentTypeIcons,
+} = window.MonkeyCodeCatalog;
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -1184,7 +1103,7 @@ function openNotificationDialog(id = null) {
   state.selectedNotificationId = channel?.id ?? null;
   $("#notification-dialog-title").textContent = channel ? "编辑通知渠道" : "添加通知渠道";
   const type = channel?.type ?? "generic";
-  const defaults = ["failed", "auth-expired", "session-warning", "auto-login-failed", "auto-login-recovered", "quota-low", "remote-task-error", "remote-task-missing", "sync-failed"];
+  const defaults = ["failed", "auth-expired", "session-warning", "auto-login-failed", "auto-login-recovered", "quota-low", "remote-task-error", "remote-task-missing", "sync-failed", "node-pool-unavailable", "node-offline", "deployment-failed", "deployment-backlog"];
   $("#notification-fields").innerHTML = `<div class="form-grid"><label class="field"><span>渠道名称</span><input name="name" maxlength="80" value="${escapeHtml(channel?.name ?? "")}" required></label><label class="field"><span>渠道类型</span><select id="notification-type" name="type" ${channel ? "disabled" : ""}>${Object.entries(notificationLabels).map(([value, label]) => `<option value="${value}" ${type === value ? "selected" : ""}>${label}</option>`).join("")}</select>${channel ? `<input type="hidden" name="type" value="${type}">` : ""}</label></div><div id="notification-type-fields"></div><div class="field"><span>通知事件</span><div class="event-check-grid">${Object.entries(notificationEventLabels).map(([event, label]) => `<label class="event-check"><input type="checkbox" name="event" value="${event}" ${(channel?.events ?? defaults).includes(event) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("")}</div></div><div class="toggle-row"><div><strong>启用渠道</strong><small>保存后立即生效</small></div><label class="switch"><input type="checkbox" name="enabled" ${channel?.enabled !== false ? "checked" : ""}><span></span></label></div>`;
   renderNotificationTypeFields(type, channel);
   $("#notification-dialog").showModal();

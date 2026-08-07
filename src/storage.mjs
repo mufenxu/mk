@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { ConfigError } from "./errors.mjs";
+import { JsonLineLogStore } from "./log-store.mjs";
 import { decryptJson, encryptJson } from "./security.mjs";
 import { validateTimeZone } from "./schedule.mjs";
+
+export { readRecentJsonLines } from "./log-store.mjs";
 
 const TASK_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -14,56 +18,6 @@ const TOKEN_HASH = /^[0-9a-f]{64}$/;
 const EXTENSION_ORIGIN = /^chrome-extension:\/\/[a-p]{32}$/;
 const BACKUP_FILE = /^config-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f-]{36}\.json$/i;
 const BRIDGE_STATUSES = new Set(["connected", "valid", "invalid", "account-mismatch"]);
-
-export async function readRecentJsonLines(filename, {
-  limit = 200,
-  matches = () => true,
-  chunkSize = 64 * 1024,
-} = {}) {
-  const file = await open(filename, "r");
-  try {
-    const { size } = await file.stat();
-    const records = [];
-    let position = size;
-    let remainder = Buffer.alloc(0);
-
-    while (position > 0 && records.length < limit) {
-      const length = Math.min(chunkSize, position);
-      position -= length;
-      const buffer = Buffer.allocUnsafe(length);
-      const { bytesRead } = await file.read(buffer, 0, length, position);
-      const chunk = Buffer.concat([buffer.subarray(0, bytesRead), remainder]);
-      let end = chunk.length;
-
-      while (records.length < limit) {
-        const newline = chunk.lastIndexOf(0x0a, end - 1);
-        if (newline < 0) break;
-        const line = chunk.subarray(newline + 1, end);
-        end = newline;
-        if (!line.length) continue;
-        try {
-          const entry = JSON.parse(line.toString("utf8"));
-          if (matches(entry)) records.push(entry);
-        } catch {
-          // Ignore malformed historical log lines and continue with older entries.
-        }
-      }
-      remainder = chunk.subarray(0, end);
-    }
-
-    if (records.length < limit && remainder.length) {
-      try {
-        const entry = JSON.parse(remainder.toString("utf8"));
-        if (matches(entry)) records.push(entry);
-      } catch {
-        // Ignore a malformed first line for consistency with existing log reads.
-      }
-    }
-    return records;
-  } finally {
-    await file.close();
-  }
-}
 
 function cleanText(value, name, max, { required = true } = {}) {
   const text = typeof value === "string" ? value.trim() : "";
@@ -266,6 +220,10 @@ function cleanEvents(events) {
     "environment-hibernated",
     "remote-task-missing",
     "sync-failed",
+    "node-pool-unavailable",
+    "node-offline",
+    "deployment-failed",
+    "deployment-backlog",
   ]);
   const cleaned = Array.isArray(events) ? events.filter((event) => allowed.has(event)) : [];
   return [...new Set(cleaned)];
@@ -339,8 +297,7 @@ export class DataStore {
     this.backupDir = path.join(this.dataDir, "backups");
     this.stateDir = path.join(this.dataDir, "task-state");
     this.config = null;
-    this.logWrite = Promise.resolve();
-    this.lastLogPruneAt = 0;
+    this.logs = new JsonLineLogStore(this.logFile, () => this.config?.operationsSettings ?? cleanOperationsSettings());
   }
 
   async init() {
@@ -368,6 +325,13 @@ export class DataStore {
       await this.writeConfig(false);
     }
     return this;
+  }
+
+  async readiness() {
+    await this.logs.wait();
+    await access(this.dataDir, constants.R_OK | constants.W_OK);
+    await access(this.configFile, constants.R_OK | constants.W_OK);
+    return { version: this.config.version };
   }
 
   validateEncryptedConfig(config) {
@@ -1124,9 +1088,7 @@ export class DataStore {
   async setOperationsSettings(input = {}) {
     this.config.operationsSettings = cleanOperationsSettings({ ...this.config.operationsSettings, ...input });
     await this.writeConfig();
-    await this.logWrite.catch(() => {});
-    this.lastLogPruneAt = Date.now();
-    await this.pruneLogs();
+    await this.logs.applyRetention();
     return structuredClone(this.config.operationsSettings);
   }
 
@@ -1190,52 +1152,19 @@ export class DataStore {
   }
 
   async appendLog(entry) {
-    const line = `${JSON.stringify({ id: randomUUID(), at: new Date().toISOString(), ...entry })}\n`;
-    this.logWrite = this.logWrite.catch(() => {}).then(async () => {
-      await writeFile(this.logFile, line, { encoding: "utf8", flag: "a", mode: 0o600 });
-      if (Date.now() - this.lastLogPruneAt >= 6 * 60 * 60_000) {
-        this.lastLogPruneAt = Date.now();
-        await this.pruneLogs();
-      }
-    });
-    return this.logWrite;
+    return this.logs.append(entry);
   }
 
   async pruneLogs() {
-    let content;
-    try {
-      content = await readFile(this.logFile, "utf8");
-    } catch (error) {
-      if (error.code === "ENOENT") return;
-      throw error;
-    }
-    const settings = this.config.operationsSettings ?? cleanOperationsSettings();
-    const cutoff = Date.now() - settings.logRetentionDays * 86_400_000;
-    const lines = content.trim().split("\n").filter(Boolean);
-    const kept = lines.filter((line) => {
-      try { return new Date(JSON.parse(line).at).getTime() >= cutoff; } catch { return false; }
-    }).slice(-settings.maxLogEntries);
-    if (kept.length === lines.length) return;
-    const temporary = `${this.logFile}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(temporary, kept.length ? `${kept.join("\n")}\n` : "", { encoding: "utf8", mode: 0o600 });
-    await rename(temporary, this.logFile);
+    return this.logs.prune();
   }
 
   async readLogs({ limit = 200, taskId, status } = {}) {
-    try {
-      return await readRecentJsonLines(this.logFile, {
-        limit,
-        matches: (entry) => (!taskId || entry.taskId === taskId) && (!status || entry.status === status),
-      });
-    } catch (error) {
-      if (error.code === "ENOENT") return [];
-      throw error;
-    }
+    return this.logs.read({ limit, taskId, status });
   }
 
   async clearLogs() {
-    this.logWrite = this.logWrite.catch(() => {}).then(() => writeFile(this.logFile, "", { encoding: "utf8", mode: 0o600 }));
-    return this.logWrite;
+    return this.logs.clear();
   }
 
   async readScheduleState() {

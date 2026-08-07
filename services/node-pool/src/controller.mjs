@@ -13,6 +13,7 @@ import {
   pruneTerminalJobs,
   publicJob,
   requeueExpiredLeases,
+  summarizeState,
   workerOnline,
 } from "./scheduler.mjs";
 
@@ -375,11 +376,25 @@ async function listStatus(request, response) {
     ...worker,
     online: workerOnline(worker, now),
   }));
-  const jobCounts = Object.fromEntries(["queued", "leased", "completed", "failed", "cancelled"].map((status) => [
-    status,
-    state.jobs.filter((job) => job.status === status).length,
-  ]));
-  sendJson(response, 200, { updatedAt: state.updatedAt, workers, jobCounts });
+  const summary = summarizeState(state, now);
+  sendJson(response, 200, { ...summary, workers });
+}
+
+async function readiness(response) {
+  try {
+    await store.readiness();
+    const summary = summarizeState(await store.read());
+    sendJson(response, 200, {
+      status: "ready",
+      state: {
+        workerCounts: summary.workerCounts,
+        jobCounts: summary.jobCounts,
+        oldestQueuedAt: summary.oldestQueuedAt,
+      },
+    });
+  } catch {
+    sendJson(response, 503, { status: "unavailable", error: "state-unavailable" });
+  }
 }
 
 async function sendWorkerBundle(request, response, nodeId) {
@@ -412,6 +427,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (request.method === "GET" && url.pathname === "/healthz") return sendJson(response, 200, { status: "ok" });
+    if (request.method === "GET" && url.pathname === "/readyz") return await readiness(response);
     if (request.method === "GET" && url.pathname === "/api/status") return await listStatus(request, response);
     if (request.method === "GET" && url.pathname === "/api/workers") {
       requireAdmin(request);

@@ -8,14 +8,17 @@
     "node": ">=20"
   },
   "scripts": {
+    "build:icons": "node scripts/build-icons.mjs",
     "start": "node src/panel.mjs",
     "start:local": "node --env-file=.env src/panel.mjs",
     "send": "node src/index.mjs",
     "test": "node --test"
   },
   "dependencies": {
-    "lucide": "^1.27.0",
     "nodemailer": "^9.0.3",
     "ws": "8.21.1"
+  },
+  "devDependencies": {
+    "lucide": "^1.27.0"
   }
 }

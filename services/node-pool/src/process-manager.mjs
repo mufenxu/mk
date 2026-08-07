@@ -104,14 +104,54 @@ async function processMatchesDirectory(pid, directory) {
   }
 }
 
+export function projectLaunch(project, resourceControl) {
+  if (!resourceControl.available || resourceControl.mode === "off") {
+    return {
+      file: project.start,
+      args: [],
+      shell: true,
+      enforced: false,
+    };
+  }
+
+  const cpuPercent = Math.max(1, Math.round(project.resources.cpu * 100));
+  const memoryMb = Math.max(16, Math.round(project.resources.memoryMb));
+  const unitName = `monkeycode-${project.name.replace(/[^a-zA-Z0-9_.-]/g, "-")}-${process.pid}-${Date.now()}`;
+  return {
+    file: "systemd-run",
+    args: [
+      "--user",
+      "--scope",
+      "--quiet",
+      "--collect",
+      `--property=CPUQuota=${cpuPercent}%`,
+      `--property=MemoryMax=${memoryMb}M`,
+      `--property=TasksMax=${resourceControl.maxProcesses}`,
+      `--unit=${unitName}`,
+      "--",
+      "/bin/sh",
+      "-lc",
+      `exec ${project.start}`,
+    ],
+    shell: false,
+    enforced: true,
+  };
+}
+
 export class ProjectManager {
-  constructor(config) {
+  constructor(config, options = {}) {
     this.config = config;
+    this.execFile = options.execFile ?? execFileAsync;
     this.root = path.resolve(config.rootDir);
     this.runtimeDir = path.join(this.root, "runtime");
     this.logDir = path.join(this.root, "logs");
     this.stateFile = path.join(this.runtimeDir, "state.json");
     this.state = { version: 1, projects: {} };
+    this.resourceControl = {
+      ...config.resourceControl,
+      available: false,
+      reason: config.resourceControl.mode === "off" ? "disabled" : "not-probed",
+    };
   }
 
   async load() {
@@ -139,7 +179,36 @@ export class ProjectManager {
       }
     }
     if (migrated) await this.save();
+    await this.detectResourceControl();
     await this.refresh();
+  }
+
+  async detectResourceControl() {
+    if (this.resourceControl.mode === "off") return this.resourceControl;
+    if (process.platform !== "linux") {
+      this.resourceControl.reason = "unsupported-platform";
+    } else {
+      try {
+        await this.execFile("systemd-run", [
+          "--user",
+          "--scope",
+          "--quiet",
+          "--collect",
+          "--property=CPUQuota=100%",
+          "--property=MemoryMax=64M",
+          "--property=TasksMax=8",
+          "true",
+        ], { timeout: 5_000 });
+        this.resourceControl.available = true;
+        this.resourceControl.reason = null;
+      } catch (error) {
+        this.resourceControl.reason = String(error.message ?? error).slice(0, 500);
+      }
+    }
+    if (this.resourceControl.mode === "required" && !this.resourceControl.available) {
+      throw new Error(`Required resource control is unavailable: ${this.resourceControl.reason}`);
+    }
+    return this.resourceControl;
   }
 
   project(name) {
@@ -188,6 +257,7 @@ export class ProjectManager {
           port: project.port ?? null,
           status: "running",
           desiredStatus: entry.desiredStatus ?? "running",
+          resourceControl: entry.resourceControl ?? "none",
           publicUrl: project.publicUrl,
           ...project.resources,
         };
@@ -207,6 +277,10 @@ export class ProjectManager {
         publicUrl: project.publicUrl,
         restartPolicy: project.restartPolicy,
         restartAttempts: entry.restartAttempts ?? 0,
+        resourceControl: entry.resourceControl ?? "none",
+        lastDeploymentError: entry.lastDeploymentError ?? null,
+        lastRollbackAt: entry.lastRollbackAt ?? null,
+        lastRollbackError: entry.lastRollbackError ?? null,
         nextRestartAt: entry.nextRestartAt ?? null,
         lastRecoveredAt: entry.lastRecoveredAt ?? null,
         lastError: entry.lastError ?? null,
@@ -315,9 +389,10 @@ export class ProjectManager {
     const previous = this.state.projects[name] ?? {};
     const logFile = path.join(this.logDir, `${name}.log`);
     const output = openSync(logFile, "a");
-    const child = spawn(project.start, {
+    const launch = projectLaunch(project, this.resourceControl);
+    const child = spawn(launch.file, launch.args, {
       cwd: project.directoryPath,
-      shell: true,
+      shell: launch.shell,
       detached: true,
       stdio: ["ignore", output, output],
       env: { ...process.env, PORT: String(project.port ?? process.env.PORT ?? "") },
@@ -333,6 +408,7 @@ export class ProjectManager {
       startedAt: new Date().toISOString(),
       stoppedAt: null,
       logFile,
+      resourceControl: launch.enforced ? "systemd" : "none",
       healthFailures: 0,
       restartAttempts: options.recovery ? previous.restartAttempts ?? 0 : 0,
       nextRestartAt: null,
@@ -362,6 +438,7 @@ export class ProjectManager {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._/@:-]{0,199}$/.test(ref ?? "")) throw new Error("Invalid Git ref");
     const project = this.project(name);
     const logFile = path.join(this.logDir, `${name}-deploy.log`);
+    const previous = structuredClone(this.state.projects[name] ?? {});
     await this.stop(name, { desiredStatus: "stopped" });
     try {
       const commit = await this.ensureRepository(project, ref, logFile);
@@ -372,11 +449,56 @@ export class ProjectManager {
       const running = await this.start(name, commit);
       return { ...running, ref, commit };
     } catch (error) {
+      const deploymentError = String(error.message ?? error);
+      if (previous.commit) {
+        try {
+          const rollbackCommit = await this.ensureRepository(project, previous.commit, logFile);
+          await runCommand(project.install, project.directoryPath, logFile);
+          await runCommand(project.build, project.directoryPath, logFile);
+          this.state.projects[name] = {
+            ...previous,
+            pid: null,
+            status: "stopped",
+            desiredStatus: previous.desiredStatus ?? (previous.status === "running" ? "running" : "stopped"),
+            commit: rollbackCommit,
+            lastDeploymentError: deploymentError,
+            lastRollbackAt: new Date().toISOString(),
+            lastRollbackError: null,
+          };
+          await this.save();
+          if (previous.status === "running" || previous.desiredStatus === "running") {
+            await this.start(name, rollbackCommit);
+          }
+          this.state.projects[name] = {
+            ...this.state.projects[name],
+            ref: previous.ref ?? null,
+            commit: rollbackCommit,
+            lastDeploymentError: deploymentError,
+            lastRollbackAt: new Date().toISOString(),
+            lastRollbackError: null,
+          };
+          await this.save();
+          throw new Error(`${deploymentError}; previous release restored`, { cause: error });
+        } catch (rollbackError) {
+          if (rollbackError.cause === error && /previous release restored$/.test(rollbackError.message)) throw rollbackError;
+          const rollbackMessage = String(rollbackError.message ?? rollbackError);
+          this.state.projects[name] = {
+            ...this.state.projects[name],
+            status: "stopped",
+            desiredStatus: previous.desiredStatus ?? "stopped",
+            lastDeploymentError: deploymentError,
+            lastRollbackError: rollbackMessage,
+          };
+          await this.save();
+          throw new Error(`${deploymentError}; rollback failed: ${rollbackMessage}`, { cause: error });
+        }
+      }
       this.state.projects[name] = {
         ...this.state.projects[name],
         status: "stopped",
         desiredStatus: "stopped",
-        lastError: error.message,
+        lastError: deploymentError,
+        lastDeploymentError: deploymentError,
       };
       await this.save();
       throw error;

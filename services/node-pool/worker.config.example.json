@@ -13,6 +13,10 @@
   "pollIntervalSeconds": 5,
   "heartbeatIntervalSeconds": 15,
   "reconcileIntervalSeconds": 15,
+  "resourceControl": {
+    "mode": "auto",
+    "maxProcesses": 128
+  },
   "recovery": {
     "initialDelaySeconds": 5,
     "maxDelaySeconds": 300,

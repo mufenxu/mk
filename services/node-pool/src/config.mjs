@@ -59,6 +59,10 @@ export function cleanWorkerConfig(config) {
 
   const projects = Object.fromEntries(Object.entries(config.projects).map(([name, project]) => [name, cleanProject(name, project)]));
   const recoveryInitialDelaySeconds = Math.max(1, Number(config.recovery?.initialDelaySeconds) || 5);
+  const resourceControlMode = config.resourceControl?.mode ?? "auto";
+  if (!["auto", "required", "off"].includes(resourceControlMode)) {
+    throw new Error("Worker resource control mode must be auto, required, or off");
+  }
   return {
     ...config,
     nodeId,
@@ -73,6 +77,10 @@ export function cleanWorkerConfig(config) {
     pollIntervalSeconds: Math.max(1, Number(config.pollIntervalSeconds) || 5),
     heartbeatIntervalSeconds: Math.max(5, Number(config.heartbeatIntervalSeconds) || 15),
     reconcileIntervalSeconds: Math.max(5, Number(config.reconcileIntervalSeconds) || 15),
+    resourceControl: {
+      mode: resourceControlMode,
+      maxProcesses: Math.min(4096, Math.max(8, Math.round(Number(config.resourceControl?.maxProcesses) || 128))),
+    },
     recovery: {
       initialDelaySeconds: recoveryInitialDelaySeconds,
       maxDelaySeconds: Math.max(recoveryInitialDelaySeconds, Number(config.recovery?.maxDelaySeconds) || 300),

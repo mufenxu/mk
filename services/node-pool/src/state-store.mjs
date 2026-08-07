@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 function initialState() {
@@ -44,6 +45,13 @@ export class StateStore {
   async read(reader = (state) => state) {
     await this.serial;
     return structuredClone(reader(this.state));
+  }
+
+  async readiness() {
+    await this.serial;
+    await access(path.dirname(this.file), constants.R_OK | constants.W_OK);
+    await access(this.file, constants.R_OK | constants.W_OK);
+    return { version: this.state.version };
   }
 
   async mutate(mutator, { persist = true } = {}) {
