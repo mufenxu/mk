@@ -4,9 +4,6 @@ import { getRemoteAccountSnapshot, getRemoteTaskDetail } from "./client.mjs";
 function accountClientConfig(account, timeoutMs) {
   if (!account) throw new ConfigError("Account not found");
   if (!account.session) throw new AuthExpiredError("Session cookie is not configured");
-  if (account.sessionExpiresAt && new Date(account.sessionExpiresAt).getTime() <= Date.now()) {
-    throw new AuthExpiredError("Session cookie has expired");
-  }
   return {
     baseUrl: new URL(account.baseUrl),
     session: account.session,

@@ -310,10 +310,10 @@ function credentialBadgeSpec(status) {
 }
 
 function credentialDetail(account) {
-  const session = account.sessionExpiresAt
-    ? `到期 ${formatDate(account.sessionExpiresAt, true)}`
-    : account.lastValidatedAt
-      ? `验证于 ${formatDate(account.lastValidatedAt)}`
+  const session = account.lastValidatedAt
+    ? `最近验证 ${formatDate(account.lastValidatedAt)}`
+    : account.sessionExpiresAt
+      ? `记录到期 ${formatDate(account.sessionExpiresAt, true)}`
       : "尚未验证";
   if (!account.loginConfigured) return session;
   if (!account.autoLoginEnabled) return `${session} · 自动续期已关闭`;

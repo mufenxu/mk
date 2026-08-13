@@ -279,11 +279,11 @@ function publicBrowserBridge(bridge) {
 
 function accountCredentialStatus(account, now = Date.now()) {
   if (!account.sessionEncrypted) return "missing";
+  if (account.lastValidationStatus === "invalid") return "invalid";
+  if (account.lastValidationStatus === "valid") return "valid";
   const expiresAt = account.sessionExpiresAt ? new Date(account.sessionExpiresAt).getTime() : null;
   if (Number.isFinite(expiresAt) && expiresAt <= now) return "expired";
-  if (account.lastValidationStatus === "invalid") return "invalid";
   if (Number.isFinite(expiresAt) && expiresAt - now <= 3 * 86_400_000) return "expiring";
-  if (account.lastValidationStatus === "valid") return "valid";
   return "unknown";
 }
 
@@ -753,7 +753,7 @@ export class DataStore {
     account.lastValidatedAt = new Date().toISOString();
     account.lastValidationStatus = status;
     if (status === "valid" && user?.id) account.userId = String(user.id);
-    if (status === "valid") account.userName = user?.name ?? user?.nickname ?? null;
+    if (status === "valid" && user) account.userName = user.name ?? user.nickname ?? account.userName ?? null;
     account.updatedAt = new Date().toISOString();
     await this.writeConfig(false);
     return this.publicAccount(account);

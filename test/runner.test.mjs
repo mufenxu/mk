@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { AuthExpiredError } from "../src/errors.mjs";
 import { TaskRunner } from "../src/runner.mjs";
 
 test("emits one session-age warning per stored cookie", async () => {
@@ -318,4 +319,117 @@ test("blocks a normal send when the configured quota reserve is reached", async 
   assert.equal(result.attempts, 0);
   assert.equal(logs[0].status, "quota-blocked");
   assert.deepEqual(notices, ["quota-low"]);
+});
+
+test("renews and retries once when the runtime session check reports an expired cookie", async () => {
+  let session = "stale-session";
+  let validationStatus = "valid";
+  const validations = [];
+  const attemptedSessions = [];
+  const task = () => ({
+    id: "task-1",
+    name: "Daily report",
+    accountId: "account-1",
+    monkeyTaskId: "remote-task",
+    baseUrl: "https://monkeycode-ai.com",
+    session,
+    sessionExpiresAt: "2026-09-01T00:00:00.000Z",
+    prompt: "Report",
+    dryRun: false,
+    dedupe: true,
+    retry: { attempts: 1, delaySeconds: 0 },
+    completion: { enabled: false },
+    schedule: { timeZone: "Asia/Shanghai" },
+  });
+  const store = {
+    getTask: () => task(),
+    getAccount: () => ({
+      id: "account-1",
+      autoLoginEnabled: true,
+      loginConfigured: true,
+      sessionConfigured: true,
+      sessionExpiresAt: "2026-09-01T00:00:00.000Z",
+      lastValidationStatus: validationStatus,
+    }),
+    getPublicConfig: () => ({
+      operationsSettings: { accountConcurrency: 1 },
+      remoteSettings: { quotaGuardEnabled: false },
+    }),
+    taskStateFile: () => "state.json",
+    recordAccountValidation: async (id, status) => {
+      validationStatus = status;
+      validations.push({ id, status });
+    },
+    appendLog: async () => {},
+  };
+  let renewals = 0;
+  const autoLogin = {
+    renewIfNeeded: async (account) => {
+      if (account.lastValidationStatus !== "invalid") return { renewed: false };
+      renewals += 1;
+      session = "renewed-session";
+      validationStatus = "valid";
+      return { renewed: true };
+    },
+  };
+  const runner = new TaskRunner(store, { notify: async () => {} }, {
+    autoLogin,
+    runOnce: async (config) => {
+      attemptedSessions.push(config.session);
+      if (config.session === "stale-session") throw new AuthExpiredError();
+      return { status: "sent" };
+    },
+  });
+
+  const result = await runner.execute("task-1", { mode: "force" });
+
+  assert.equal(result.status, "sent");
+  assert.deepEqual(attemptedSessions, ["stale-session", "renewed-session"]);
+  assert.deepEqual(validations, [
+    { id: "account-1", status: "invalid" },
+    { id: "account-1", status: "valid" },
+  ]);
+  assert.equal(renewals, 1);
+});
+
+test("uses the runtime session check instead of blocking on the stored expiry time", async () => {
+  const task = {
+    id: "task-1",
+    name: "Daily report",
+    accountId: "account-1",
+    monkeyTaskId: "remote-task",
+    baseUrl: "https://monkeycode-ai.com",
+    session: "still-valid-session",
+    sessionExpiresAt: "2026-08-01T00:00:00.000Z",
+    prompt: "Report",
+    dryRun: false,
+    dedupe: true,
+    retry: { attempts: 1, delaySeconds: 0 },
+    completion: { enabled: false },
+    schedule: { timeZone: "Asia/Shanghai" },
+  };
+  let runCalls = 0;
+  const store = {
+    getTask: () => task,
+    getPublicConfig: () => ({
+      operationsSettings: { accountConcurrency: 1 },
+      remoteSettings: { quotaGuardEnabled: false },
+    }),
+    taskStateFile: () => "state.json",
+    appendLog: async () => {},
+  };
+  const runner = new TaskRunner(store, { notify: async () => {} }, {
+    runOnce: async () => {
+      runCalls += 1;
+      return { status: "sent" };
+    },
+  });
+
+  const result = await runner.execute("task-1", {
+    mode: "force",
+    now: new Date("2026-08-13T00:00:00.000Z"),
+  });
+
+  assert.equal(result.status, "sent");
+  assert.equal(runCalls, 1);
 });

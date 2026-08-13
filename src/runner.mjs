@@ -162,9 +162,6 @@ export class TaskRunner {
     const account = this.store.getAccount(id, { withSession: true });
     if (!account) throw new ConfigError("Account not found");
     if (!account.session) throw new AuthExpiredError("Session cookie is not configured");
-    if (account.sessionExpiresAt && new Date(account.sessionExpiresAt).getTime() <= Date.now()) {
-      throw new AuthExpiredError("Session cookie has expired");
-    }
     return checkSession({
       baseUrl: new URL(account.baseUrl),
       session: account.session,
@@ -362,6 +359,8 @@ export class TaskRunner {
     let result;
     let finalError;
     let attempt = 0;
+    let sessionRecoveryAttempted = false;
+    let retryAfterSessionRecovery = false;
     let baseline = null;
     const runId = options.runId ?? `${task.id}:${startedAt}`;
 
@@ -377,7 +376,6 @@ export class TaskRunner {
 
     if (signal?.aborted) finalError = new CancelledError();
     else if (!task.session) finalError = new AuthExpiredError("Session cookie is not configured");
-    else if (sessionExpiry(task, now).expired) finalError = new AuthExpiredError("Session cookie has expired");
 
     const quotaBlock = !finalError && !dryRun ? this.quotaBlock(task, mode) : null;
     if (quotaBlock) result = { status: "quota-blocked", detail: quotaBlock };
@@ -389,8 +387,9 @@ export class TaskRunner {
       }
     }
 
-    while (!finalError && !result && attempt < attempts) {
+    while (!finalError && !result && (attempt < attempts || retryAfterSessionRecovery)) {
       attempt += 1;
+      retryAfterSessionRecovery = false;
       try {
         result = await this.runOnce(this.clientConfig(task, prompt, dryRun, signal), {
           now,
@@ -402,9 +401,28 @@ export class TaskRunner {
             ? task.completion.timeoutMinutes * 60_000
             : undefined,
         });
+        if (task.accountId) await this.store.recordAccountValidation?.(task.accountId, "valid");
         break;
       } catch (error) {
         finalError = error;
+        if (error instanceof AuthExpiredError && task.accountId) {
+          await this.store.recordAccountValidation?.(task.accountId, "invalid");
+          if (!sessionRecoveryAttempted && this.autoLogin) {
+            sessionRecoveryAttempted = true;
+            const account = this.store.getAccount(task.accountId);
+            try {
+              const renewal = await this.autoLogin.renewIfNeeded(account, { now, trigger: "task-run" });
+              if (renewal.renewed) {
+                task = this.store.getTask(id, { withSession: true });
+                finalError = null;
+                retryAfterSessionRecovery = true;
+                continue;
+              }
+            } catch {
+              // Renewal failure is recorded and backed off by AutoLoginService.
+            }
+          }
+        }
         if (attempt < attempts && retryable(error)) {
           try {
             await this.wait(task.retry.delaySeconds * 1000, signal);
@@ -542,7 +560,7 @@ export class TaskRunner {
           ? "Cookie is invalid and automatic login could not restore the session"
           : "Cookie is invalid; sign in to MonkeyCode again to resume this account";
         marker = `${account.sessionUpdatedAt ?? "unknown"}:invalid:${event}`;
-      } else if (account.sessionExpiresAt) {
+      } else if (account.lastValidationStatus !== "valid" && account.sessionExpiresAt) {
         const expiry = sessionExpiry(account, now);
         const remainingMs = new Date(account.sessionExpiresAt).getTime() - now.getTime();
         const renewalFailed = account.lastAutoLoginStatus === "failed";
