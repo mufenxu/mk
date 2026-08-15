@@ -19,7 +19,7 @@ async function createRemoteMock() {
   const activeTask = {
     id: remoteTaskId,
     title: "",
-    summary: "项目部署状态确认",
+    summary: "服务状态确认",
     content: "请确认项目状态",
     status: "processing",
     type: "develop",
@@ -112,7 +112,7 @@ test("remote snapshot uses only HTTP metadata APIs and removes sensitive fields"
     assert.equal(snapshot.tasks.length, 1);
     assert.equal(snapshot.tasks[0].createdAt, "2026-07-27T03:50:46.000Z");
     assert.equal(snapshot.tasks[0].lastActiveAt, "2026-07-27T10:27:31.000Z");
-    assert.equal(snapshot.tasks[0].name, "项目部署状态确认");
+    assert.equal(snapshot.tasks[0].name, "服务状态确认");
     assert.equal(snapshot.tasks[0].completedAt, null);
     assert.equal(snapshot.tasks[0].environment.state, "running");
     assert.equal("externalIp" in snapshot.tasks[0].environment, false);

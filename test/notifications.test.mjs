@@ -1,13 +1,8 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
-import os from "node:os";
-import path from "node:path";
 import test from "node:test";
 
 import { sendNotification } from "../src/notifications.mjs";
-import { DataStore } from "../src/storage.mjs";
 
 test("sends a structured generic webhook notification", async () => {
   let received = null;
@@ -36,24 +31,5 @@ test("sends a structured generic webhook notification", async () => {
     assert.match(received.message, /发送成功/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
-  }
-});
-
-test("notification channels retain node-pool operations events", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "monkeycode-notifications-"));
-  try {
-    const store = await new DataStore(directory, randomBytes(32)).init();
-    const events = ["node-pool-unavailable", "node-offline", "deployment-failed", "deployment-backlog"];
-    const channel = await store.upsertNotification({
-      name: "Operations",
-      type: "generic",
-      enabled: true,
-      events,
-      settings: {},
-      secret: { webhookUrl: "https://example.test/notify" },
-    });
-    assert.deepEqual(channel.events, events);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
   }
 });

@@ -21,7 +21,6 @@
 - 通用 Webhook、企业微信、钉钉、Telegram、Bark 和 SMTP 邮件通知。
 - 执行日志筛选、CSV 导出、配置导入导出和最近 30 份自动备份。
 - 响应式桌面与手机界面。
-- 在同一登录会话中管理 Node Pool 节点、资源、项目白名单、后台 Worker、项目自动恢复与公网访问地址。
 
 Cookie 和通知密钥使用 AES-256-GCM 加密保存。浏览器桥接令牌在 VPS 上只保存 SHA-256 哈希；管理 API 不返回原始密钥，面板写操作使用 HttpOnly 管理会话和 CSRF 校验。
 
@@ -165,13 +164,13 @@ npm run send
 
 ## Docker 与 GitHub Actions
 
-面板和 Node Pool 控制器镜像只在 GitHub Actions 中构建，并发布到同一个阿里云 ACR 镜像仓库：
+项目镜像只在 GitHub Actions 中构建，并发布到阿里云 ACR：
 
 ```text
 crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/my
 ```
 
-面板使用 `latest`、`sha-<提交号>` 和版本号标签；Node Pool 使用 `node-pool-latest`、`node-pool-sha-<提交号>` 和 `node-pool-<版本号>` 标签，两个镜像不会互相覆盖。Pull Request 只执行检查、构建和两个容器的健康检查，不推送镜像。仓库需要配置 GitHub Actions Secret `ALIYUN_ACR_PASSWORD`，值为阿里云容器镜像服务个人版的固定登录密码；登录用户名和镜像地址已经固定在工作流中。密码不会写入代码、日志或镜像。
+推送 `main` 后发布 `latest` 和 `sha-<提交号>`；推送 `v*` 标签后额外发布去掉 `v` 前缀的版本标签。Pull Request 只执行测试、构建和容器健康检查，不推送镜像。仓库需要配置 GitHub Actions Secret `ALIYUN_ACR_PASSWORD`，值为阿里云容器镜像服务个人版的固定登录密码；登录用户名和镜像地址已经固定在工作流中。密码不会写入代码、日志或镜像。
 
 VPS 在 `compose.yaml` 同目录创建唯一的真实配置文件 `.env`，可直接以 [`.env.example`](.env.example) 为变量清单。至少填写：
 
@@ -180,13 +179,9 @@ MONKEYCODE_PANEL_PASSWORD=填写至少12位的管理密码
 MONKEYCODE_MASTER_KEY=填写32字节Base64主密钥
 MONKEYCODE_SECURE_COOKIE=true
 MONKEYCODE_BROWSER_BRIDGE_ENABLED=true
-MK_ADMIN_TOKEN=沿用现有管理令牌
-MK_WORKER_SECRET=沿用现有Worker密钥
-MONKEYCODE_NODE_POOL_PUBLIC_URL=https://mk.pxyb.cn/node-pool
-MK_MANAGEMENT_URL=https://mk.pxyb.cn/#deployments
 ```
 
-面板和控制器在容器内分别监听 `4180`、`4191`，控制器宿主机兼容映射到 `127.0.0.1:4190`，且宿主机只监听 `127.0.0.1`。公网统一使用 `mk.pxyb.cn`：管理页面位于 `/#deployments`，Worker API 和受保护的安装包位于 `/node-pool/`。所有公网请求都进入面板的 4180 端口，面板只把经过路径白名单校验的 Worker 请求转发到控制器；节点池管理 API 和 `MK_ADMIN_TOKEN` 不会暴露到公网。Nginx 无需为 4190 增加第二个反向代理。
+容器内监听地址、端口和数据目录由 `compose.yaml` 固定为 `0.0.0.0:4180` 和 `/data`。宿主机只监听 `127.0.0.1:4180`，继续由 Nginx 提供公网 HTTPS。
 
 首次部署或更新：
 
@@ -195,10 +190,9 @@ docker compose pull
 docker compose up -d
 docker compose ps
 docker compose logs --tail=200 monkeycode-panel
-docker compose logs --tail=200 node-pool-controller
 ```
 
-从旧 systemd 或独立 Compose 控制器迁移时，先保留原密钥和 `state.json`，再导入新的 `node-pool-data` 命名卷。不要用空状态直接覆盖现有控制器。如果阿里云仓库要求登录拉取，请在 VPS 使用相同的 ACR 用户名和固定密码执行 `docker login`。`docker compose down` 不删除命名卷，不能使用 `docker compose down -v`，否则会删除面板和 Node Pool 数据。
+如果阿里云仓库要求登录拉取，请在 VPS 使用相同的 ACR 用户名和固定密码执行 `docker login`。`docker compose down` 不删除命名卷，不能使用 `docker compose down -v`，否则会删除面板数据。
 
 ## 测试
 

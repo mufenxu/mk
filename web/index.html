@@ -41,7 +41,6 @@
         <button class="nav-item" type="button" data-page="tasks"><i data-lucide="calendar-clock"></i><span>任务</span><span id="nav-task-count" class="nav-count">0</span></button>
         <button class="nav-item" type="button" data-page="remote"><i data-lucide="cloud-cog"></i><span>远端任务</span><span id="nav-remote-count" class="nav-count">0</span></button>
         <button class="nav-item" type="button" data-page="accounts"><i data-lucide="users-round"></i><span>账号</span><span id="nav-account-count" class="nav-count">0</span></button>
-        <button class="nav-item" type="button" data-page="deployments"><i data-lucide="boxes"></i><span>项目部署</span><span id="nav-deployment-count" class="nav-count">0</span></button>
         <button class="nav-item" type="button" data-page="history"><i data-lucide="history"></i><span>记录</span></button>
         <button class="nav-item" type="button" data-page="settings"><i data-lucide="settings-2"></i><span>设置</span></button>
       </nav>
@@ -107,48 +106,6 @@
           <div><h2>MonkeyCode 账号</h2><p>一个账号可供多个定时任务共用</p></div>
         </div>
         <div id="account-list" class="account-table-wrap"></div>
-      </section>
-
-      <section id="page-deployments" class="page" aria-labelledby="page-title">
-        <div class="deployment-toolbar">
-          <div class="deployment-tabs" role="tablist" aria-label="项目部署视图">
-            <button class="deployment-tab active" type="button" role="tab" aria-selected="true" data-deployment-view="overview"><i data-lucide="layout-dashboard"></i><span>概览</span></button>
-            <button class="deployment-tab" type="button" role="tab" aria-selected="false" data-deployment-view="workers"><i data-lucide="server"></i><span>节点</span></button>
-            <button class="deployment-tab" type="button" role="tab" aria-selected="false" data-deployment-view="jobs"><i data-lucide="list-checks"></i><span>部署任务</span></button>
-          </div>
-          <button id="issue-worker-token" class="button secondary" type="button"><i data-lucide="key-round"></i><span>接入节点</span></button>
-        </div>
-        <div id="deployment-error" class="deployment-error" hidden></div>
-
-        <section class="deployment-panel active" data-deployment-panel="overview">
-          <div id="deployment-stats" class="stats-grid"></div>
-          <div class="deployment-overview-grid">
-            <section class="deployment-data-section">
-              <div class="section-heading compact"><div><h2>节点状态</h2><p>Worker 心跳、项目白名单与资源占用</p></div><button class="text-button" type="button" data-deployment-view="workers">查看全部</button></div>
-              <div class="deployment-table-wrap"><table><thead><tr><th>节点</th><th>状态</th><th>项目</th><th>资源</th></tr></thead><tbody id="deployment-overview-workers"></tbody></table></div>
-            </section>
-            <section class="deployment-data-section">
-              <div class="section-heading compact"><div><h2>最近部署任务</h2><p>最新调度与执行结果</p></div><button class="text-button" type="button" data-deployment-view="jobs">查看全部</button></div>
-              <div id="deployment-recent-jobs" class="deployment-activity-list"></div>
-            </section>
-          </div>
-        </section>
-
-        <section class="deployment-panel" data-deployment-panel="workers">
-          <div class="deployment-filterbar">
-            <label class="deployment-search"><i data-lucide="search"></i><input id="deployment-worker-search" type="search" placeholder="搜索节点、标签或项目" aria-label="搜索节点"></label>
-          </div>
-          <div class="deployment-table-wrap deployment-main-table"><table><thead><tr><th>节点</th><th>状态</th><th>资源</th><th>白名单项目</th><th>项目状态</th><th>公网服务</th><th>最近心跳</th><th aria-label="操作"></th></tr></thead><tbody id="deployment-workers"></tbody></table></div>
-        </section>
-
-        <section class="deployment-panel" data-deployment-panel="jobs">
-          <div class="deployment-filterbar">
-            <label class="deployment-search"><i data-lucide="search"></i><input id="deployment-job-search" type="search" placeholder="搜索项目、任务 ID 或节点" aria-label="搜索部署任务"></label>
-            <label class="compact-field"><span>状态</span><select id="deployment-job-status"><option value="">全部状态</option><option value="queued">排队</option><option value="leased">执行中</option><option value="completed">已完成</option><option value="failed">失败</option><option value="cancelled">已取消</option></select></label>
-            <label class="compact-field"><span>操作</span><select id="deployment-job-type"><option value="">全部操作</option><option value="deploy">部署</option><option value="start">启动</option><option value="restart">重启</option><option value="stop">停止</option></select></label>
-          </div>
-          <div class="deployment-table-wrap deployment-main-table"><table><thead><tr><th>项目</th><th>操作</th><th>状态</th><th>节点</th><th>资源要求</th><th>时间</th><th></th></tr></thead><tbody id="deployment-jobs"></tbody></table></div>
-        </section>
       </section>
 
       <section id="page-history" class="page" aria-labelledby="page-title">
@@ -262,72 +219,6 @@
       <div id="notification-fields" class="dialog-body"></div>
       <div class="dialog-footer"><button class="button secondary" type="button" data-close-dialog="notification-dialog">取消</button><button class="button primary" type="submit"><i data-lucide="save"></i><span>保存</span></button></div>
     </form>
-  </dialog>
-
-  <dialog id="deployment-job-dialog" class="dialog">
-    <form id="deployment-job-form" method="dialog">
-      <div class="dialog-header"><div><p class="eyebrow">DEPLOYMENT JOB</p><h2>新建部署任务</h2></div><button class="icon-button" type="button" data-close-dialog="deployment-job-dialog" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></div>
-      <div class="dialog-body">
-        <fieldset class="deployment-segmented" aria-label="任务操作">
-          <label><input type="radio" name="type" value="deploy" checked><span><i data-lucide="rocket"></i>部署</span></label>
-          <label><input type="radio" name="type" value="start"><span><i data-lucide="play"></i>启动</span></label>
-          <label><input type="radio" name="type" value="restart"><span><i data-lucide="rotate-cw"></i>重启</span></label>
-          <label><input type="radio" name="type" value="stop"><span><i data-lucide="square"></i>停止</span></label>
-        </fieldset>
-        <div class="form-grid">
-          <label class="field"><span>项目</span><input name="project" list="deployment-project-options" maxlength="80" required><datalist id="deployment-project-options"></datalist></label>
-          <label id="deployment-job-ref-field" class="field"><span>Git 引用</span><input name="ref" value="main" maxlength="200" required></label>
-          <label class="field"><span>指定节点</span><select id="deployment-job-worker" name="preferredWorkerId"><option value="">自动选择</option></select></label>
-          <label class="field"><span>标签</span><input name="labels" placeholder="node,python"></label>
-          <label class="field"><span>CPU</span><input name="cpu" type="number" min="0" step="0.1" value="0.25"></label>
-          <label class="field"><span>内存 MB</span><input name="memoryMb" type="number" min="0" step="128" value="256"></label>
-          <label class="field"><span>优先级</span><input name="priority" type="number" min="0" max="100" step="1" value="50"></label>
-        </div>
-      </div>
-      <div class="dialog-footer"><button class="button secondary" type="button" data-close-dialog="deployment-job-dialog">取消</button><button class="button primary" type="submit"><i data-lucide="send"></i><span>提交任务</span></button></div>
-    </form>
-  </dialog>
-
-  <dialog id="worker-token-dialog" class="dialog worker-token-dialog">
-    <form id="worker-token-form" method="dialog">
-      <div class="dialog-header"><div><p class="eyebrow">WORKER</p><h2>接入新节点</h2></div><button class="icon-button" type="button" data-close-dialog="worker-token-dialog" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></div>
-      <div class="dialog-body">
-        <div class="worker-onboarding-heading">
-          <div class="worker-step-number">1</div>
-          <div><h3>创建节点凭据</h3><p>为目标 MonkeyCode 环境填写唯一的节点 ID，然后生成专属凭据。</p></div>
-        </div>
-        <label class="field"><span>节点 ID</span><input name="nodeId" maxlength="64" placeholder="monkey-env-01" required><small class="field-hint">建议使用便于识别的名称，例如 monkey-env-01。</small></label>
-        <label class="field"><span>端口公网地址</span><input name="publicUrlSample" maxlength="2048" placeholder="https://39080-environment.monkeycode-ai.online"><small class="field-hint">可选。粘贴该环境任意端口的公网地址，安装命令会自动生成项目访问地址。</small></label>
-        <div id="worker-token-result" class="worker-token-result" hidden>
-          <div class="worker-onboarding-heading">
-            <div class="worker-step-number">2</div>
-            <div><h3>在 MonkeyCode 环境运行命令</h3><p>打开目标环境的终端，复制并粘贴下面的完整命令。节点信息和令牌已自动填入，无需开放入站端口。</p></div>
-          </div>
-          <div class="worker-install-command">
-            <div class="worker-command-heading"><span>安装并启动 Worker</span><button class="button secondary compact" type="button" data-copy-target="worker-install-command"><i data-lucide="copy"></i><span>复制完整命令</span></button></div>
-            <textarea id="worker-install-command" class="mono" readonly spellcheck="false" aria-label="Worker 安装命令"></textarea>
-          </div>
-          <div class="worker-onboarding-heading">
-            <div class="worker-step-number">3</div>
-            <div><h3>确认节点上线</h3><p>命令完成后 Worker 将在后台守护运行，关闭终端不会中断。返回本页刷新即可看到在线节点。</p></div>
-          </div>
-          <details class="worker-credentials">
-            <summary>查看接入凭据</summary>
-            <div class="worker-credential-fields">
-              <label class="field"><span>Worker 令牌</span><span class="deployment-copy-field"><input id="worker-token-value" class="mono" readonly><button class="icon-button" type="button" data-copy-target="worker-token-value" title="复制令牌" aria-label="复制令牌"><i data-lucide="copy"></i></button></span></label>
-              <label class="field"><span>安装包地址</span><span class="deployment-copy-field"><input id="worker-bundle-url" class="mono" readonly><button class="icon-button" type="button" data-copy-target="worker-bundle-url" title="复制地址" aria-label="复制地址"><i data-lucide="copy"></i></button></span></label>
-            </div>
-          </details>
-        </div>
-      </div>
-      <div class="dialog-footer"><button class="button secondary" type="button" data-close-dialog="worker-token-dialog">关闭</button><button class="button primary" type="submit"><i data-lucide="key-round"></i><span>生成令牌</span></button></div>
-    </form>
-  </dialog>
-
-  <dialog id="deployment-detail-dialog" class="dialog">
-    <div class="dialog-header"><div><p class="eyebrow">DEPLOYMENT DETAIL</p><h2 id="deployment-detail-title">部署任务详情</h2></div><button class="icon-button" type="button" data-close-dialog="deployment-detail-dialog" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></div>
-    <div class="dialog-body"><dl id="deployment-detail-list" class="deployment-detail-list"></dl><pre id="deployment-detail-output" class="deployment-detail-output"></pre></div>
-    <div class="dialog-footer"><button class="button secondary" type="button" data-close-dialog="deployment-detail-dialog">关闭</button></div>
   </dialog>
 
   <dialog id="confirm-dialog" class="dialog confirm-dialog">

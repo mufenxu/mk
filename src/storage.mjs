@@ -220,10 +220,6 @@ function cleanEvents(events) {
     "environment-hibernated",
     "remote-task-missing",
     "sync-failed",
-    "node-pool-unavailable",
-    "node-offline",
-    "deployment-failed",
-    "deployment-backlog",
   ]);
   const cleaned = Array.isArray(events) ? events.filter((event) => allowed.has(event)) : [];
   return [...new Set(cleaned)];

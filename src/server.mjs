@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isExtensionOrigin } from "./browser-bridge.mjs";
-import { AuthExpiredError, BridgeError, ConfigError, NodePoolError, RemoteError } from "./errors.mjs";
+import { AuthExpiredError, BridgeError, ConfigError, RemoteError } from "./errors.mjs";
 import { createToken, verifyPassword } from "./security.mjs";
 import { StaticAssets } from "./static-assets.mjs";
 
@@ -82,7 +82,6 @@ export class PanelServer {
     this.remoteSync = options.remoteSync ?? null;
     this.environmentKeeper = options.environmentKeeper ?? null;
     this.autoLogin = options.autoLogin ?? null;
-    this.nodePool = options.nodePool ?? null;
     this.staticAssets = new StaticAssets(webDir);
     this.sessions = new Map();
     this.loginAttempts = new Map();
@@ -137,16 +136,6 @@ export class PanelServer {
     securityHeaders(response);
     const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
     try {
-      if (["GET", "HEAD"].includes(request.method) && ["/node-pool", "/node-pool/"].includes(url.pathname)) {
-        response.writeHead(302, { Location: "/#deployments", "Cache-Control": "no-store" });
-        response.end();
-        return;
-      }
-      if (url.pathname.startsWith("/node-pool/")) {
-        if (!this.nodePool) throw new NodePoolError("节点池管理尚未配置", 503);
-        await this.nodePool.forwardWorkerRequest(request, response, url.pathname.slice("/node-pool".length));
-        return;
-      }
       if (!url.pathname.startsWith("/api/")) {
         if (await this.staticAssets.serve(request, response, url.pathname)) return;
         json(response, 404, { error: "not-found" });
@@ -304,39 +293,6 @@ export class PanelServer {
             diskFreeGb,
           },
         });
-        return;
-      }
-
-      if (url.pathname === "/api/node-pool/overview" && request.method === "GET") {
-        if (!this.nodePool) {
-          json(response, 200, { available: false, workers: [], jobs: [], jobCounts: {}, error: "节点池管理尚未配置" });
-          return;
-        }
-        json(response, 200, await this.nodePool.overview());
-        return;
-      }
-      if (url.pathname === "/api/node-pool/jobs" && request.method === "POST") {
-        if (!this.nodePool) throw new NodePoolError("节点池管理尚未配置", 503);
-        json(response, 201, await this.nodePool.createJob(await readBody(request, 64 * 1024)));
-        return;
-      }
-      if (url.pathname === "/api/node-pool/workers/token" && request.method === "POST") {
-        if (!this.nodePool) throw new NodePoolError("节点池管理尚未配置", 503);
-        const body = await readBody(request, 16 * 1024);
-        json(response, 200, await this.nodePool.issueWorkerToken(body.nodeId));
-        return;
-      }
-      const nodePoolWorkerDeletion = /^\/api\/node-pool\/workers\/([^/]+)$/.exec(url.pathname);
-      if (nodePoolWorkerDeletion && request.method === "DELETE") {
-        if (!this.nodePool) throw new NodePoolError("节点池管理尚未配置", 503);
-        json(response, 200, await this.nodePool.deleteWorker(decodeURIComponent(nodePoolWorkerDeletion[1])));
-        return;
-      }
-      const nodePoolCancellation = /^\/api\/node-pool\/jobs\/([^/]+)\/cancel$/.exec(url.pathname);
-      if (nodePoolCancellation && request.method === "POST") {
-        if (!this.nodePool) throw new NodePoolError("节点池管理尚未配置", 503);
-        await readBody(request, 16 * 1024);
-        json(response, 200, await this.nodePool.cancelJob(decodeURIComponent(nodePoolCancellation[1])));
         return;
       }
 
@@ -616,11 +572,6 @@ export class PanelServer {
       } else if (error instanceof RemoteError) {
         json(response, error.status && error.status >= 400 && error.status < 600 ? error.status : 502, {
           error: "remote-error",
-          message: error.message,
-        });
-      } else if (error instanceof NodePoolError) {
-        json(response, error.status && error.status >= 400 && error.status < 600 ? error.status : 502, {
-          error: "node-pool-error",
           message: error.message,
         });
       } else {

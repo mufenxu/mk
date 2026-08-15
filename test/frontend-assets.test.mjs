@@ -24,6 +24,6 @@ test("frontend catalog is loaded before the application and exposes stable label
   const source = await readFile(path.join(root, "web", "catalog.js"), "utf8");
   const sandbox = { window: {} };
   vm.runInNewContext(source, sandbox);
-  assert.equal(sandbox.window.MonkeyCodeCatalog.pageMeta.deployments[0], "项目部署");
-  assert.equal(sandbox.window.MonkeyCodeCatalog.notificationEventLabels["node-offline"], "部署节点离线");
+  assert.equal(sandbox.window.MonkeyCodeCatalog.pageMeta.tasks[0], "任务管理");
+  assert.equal(sandbox.window.MonkeyCodeCatalog.notificationEventLabels["remote-task-error"], "远端异常");
 });

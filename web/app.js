@@ -9,8 +9,6 @@ const state = {
   logs: [],
   backups: [],
   settings: null,
-  nodePool: { available: false, workers: [], jobs: [], jobCounts: {}, error: null },
-  deploymentView: "overview",
   selectedTaskId: null,
   newTask: false,
   selectedAccountId: null,
@@ -32,9 +30,6 @@ const {
   statusLabels,
   notificationLabels,
   notificationEventLabels,
-  deploymentStatusLabels,
-  deploymentTypeLabels,
-  deploymentTypeIcons,
 } = window.MonkeyCodeCatalog;
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -192,18 +187,11 @@ async function loadData() {
   const page = state.page;
   const needsSettings = !state.settings || ["accounts", "settings"].includes(page);
   const logLimit = page === "history" ? 500 : page === "tasks" ? 100 : 0;
-  const [overview, settings, logs, backups, nodePool] = await Promise.all([
+  const [overview, settings, logs, backups] = await Promise.all([
     api(`/api/overview?activity=${page === "overview" ? "1" : "0"}`),
     needsSettings ? api("/api/settings") : Promise.resolve(state.settings),
     logLimit ? api(`/api/logs?limit=${logLimit}`) : Promise.resolve(null),
     page === "settings" ? api("/api/backups") : Promise.resolve(null),
-    page === "deployments" ? api("/api/node-pool/overview").catch((error) => ({
-      available: false,
-      workers: [],
-      jobs: [],
-      jobCounts: {},
-      error: error.message,
-    })) : Promise.resolve(null),
   ]);
   state.overview = overview;
   state.accounts = overview.accounts;
@@ -211,7 +199,6 @@ async function loadData() {
   state.settings = settings;
   if (logs) state.logs = logs.logs;
   if (backups) state.backups = backups.backups;
-  if (nodePool) state.nodePool = nodePool;
   if (state.selectedTaskId && !state.tasks.some((task) => task.id === state.selectedTaskId)) {
     state.selectedTaskId = null;
     state.taskFormDirty = false;
@@ -219,7 +206,6 @@ async function loadData() {
   $("#nav-task-count").textContent = state.tasks.length;
   $("#nav-account-count").textContent = state.accounts.length;
   $("#nav-remote-count").textContent = allRemoteTasks().length;
-  $("#nav-deployment-count").textContent = (state.nodePool.jobCounts?.queued ?? 0) + (state.nodePool.jobCounts?.leased ?? 0);
   $("#last-refresh").textContent = `更新于 ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
   renderCurrentPage();
 }
@@ -232,7 +218,6 @@ function renderCurrentPage() {
   }
   if (state.page === "remote") renderRemoteTasks();
   if (state.page === "accounts") renderAccounts();
-  if (state.page === "deployments") renderDeployments();
   if (state.page === "history") {
     renderHistoryFilters();
     renderHistory();
@@ -567,271 +552,6 @@ function collectAccountForm() {
   };
 }
 
-function deploymentNumber(value, digits = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number.toLocaleString("zh-CN", { maximumFractionDigits: digits }) : "0";
-}
-
-function deploymentBadge(status, label = deploymentStatusLabels[status] ?? status) {
-  const safeStatus = ["queued", "leased", "completed", "failed", "cancelled", "online", "offline"].includes(status) ? status : "offline";
-  return `<span class="badge ${safeStatus}">${escapeHtml(label)}</span>`;
-}
-
-function deploymentEmptyRow(columns, message) {
-  return `<tr class="deployment-empty-row"><td colspan="${columns}">${escapeHtml(message)}</td></tr>`;
-}
-
-function deploymentProjects() {
-  return [...new Set((state.nodePool.workers ?? []).flatMap((worker) => worker.projects ?? []))].sort((a, b) => a.localeCompare(b));
-}
-
-function deploymentWorkerUsage(worker) {
-  const allocations = worker.allocations ?? [];
-  return {
-    cpu: allocations.reduce((sum, entry) => sum + (Number(entry.cpu) || 0), 0),
-    memoryMb: allocations.reduce((sum, entry) => sum + (Number(entry.memoryMb) || 0), 0),
-  };
-}
-
-function renderDeployments() {
-  const pool = state.nodePool;
-  const workers = pool.workers ?? [];
-  const jobs = pool.jobs ?? [];
-  const counts = pool.jobCounts ?? {};
-  const online = workers.filter((worker) => worker.online).length;
-  const error = $("#deployment-error");
-  error.hidden = pool.available !== false;
-  error.textContent = pool.error || "节点池控制器暂时不可用";
-
-  $("#deployment-stats").innerHTML = [
-    ["server", "在线节点", online, `共 ${workers.length} 个节点`],
-    ["folder-git-2", "可用项目", deploymentProjects().length, "Worker 白名单项目"],
-    ["activity", "活跃部署任务", (counts.queued ?? 0) + (counts.leased ?? 0), `${counts.queued ?? 0} 排队 · ${counts.leased ?? 0} 执行`],
-    ["circle-alert", "失败任务", counts.failed ?? 0, `${counts.completed ?? 0} 个任务已完成`],
-  ].map(([icon, label, value, note]) => `<article class="stat-card"><div class="stat-card-top"><span>${label}</span><span class="stat-icon"><i data-lucide="${icon}"></i></span></div><div><div class="stat-value">${deploymentNumber(value)}</div><div class="stat-note">${escapeHtml(note)}</div></div></article>`).join("");
-
-  const overviewWorkers = [...workers].sort((a, b) => Number(b.online) - Number(a.online) || a.id.localeCompare(b.id)).slice(0, 6);
-  $("#deployment-overview-workers").innerHTML = overviewWorkers.length ? overviewWorkers.map((worker) => {
-    const usage = deploymentWorkerUsage(worker);
-    return `<tr><td>${deploymentEntity("server", worker.id, (worker.labels ?? []).join(", ") || "无标签")}</td><td>${deploymentBadge(worker.online ? "online" : "offline", worker.online ? "在线" : "离线")}</td><td><strong>${worker.projects?.length ?? 0}</strong><div class="deployment-meta">${worker.allocations?.length ?? 0} 个运行中</div></td><td><div class="deployment-resource"><strong>${deploymentNumber(usage.cpu, 1)} / ${deploymentNumber(worker.capacity?.cpu, 1)} CPU</strong><span>${deploymentNumber(usage.memoryMb)} / ${deploymentNumber(worker.capacity?.memoryMb)} MB</span></div></td></tr>`;
-  }).join("") : deploymentEmptyRow(4, pool.available === false ? "节点池控制器不可用" : "尚未接入 Worker");
-
-  const recentJobs = [...jobs].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 7);
-  $("#deployment-recent-jobs").innerHTML = recentJobs.length ? recentJobs.map((job) => `
-    <button class="deployment-activity" type="button" data-deployment-job-detail="${escapeHtml(job.id)}">
-      <span class="deployment-activity-icon"><i data-lucide="${deploymentTypeIcons[job.type] ?? "circle-dot"}"></i></span>
-      <span class="deployment-activity-copy"><strong>${escapeHtml(job.project)} · ${escapeHtml(deploymentTypeLabels[job.type] ?? job.type)}</strong><span>${escapeHtml(job.assignedWorkerId || "等待节点")} · ${escapeHtml(job.ref || "-")}</span></span>
-      <span class="deployment-activity-side"><time>${formatDate(job.createdAt)}</time>${deploymentBadge(job.status)}</span>
-    </button>`).join("") : `<div class="deployment-activity-empty">${pool.available === false ? "节点池控制器不可用" : "暂无部署任务"}</div>`;
-
-  renderDeploymentWorkers();
-  renderDeploymentJobs();
-  setDeploymentView(state.deploymentView, false);
-}
-
-function deploymentEntity(icon, title, detail) {
-  return `<div class="deployment-entity"><span class="deployment-entity-icon"><i data-lucide="${icon}"></i></span><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail)}</small></div></div>`;
-}
-
-function renderDeploymentWorkers() {
-  const query = $("#deployment-worker-search").value.trim().toLowerCase();
-  const workers = [...(state.nodePool.workers ?? [])].filter((worker) => !query || [
-    worker.id,
-    ...(worker.labels ?? []),
-    ...(worker.projects ?? []),
-    ...(worker.allocations ?? []).map((entry) => entry.project),
-    ...(worker.projectStates ?? []).flatMap((entry) => [entry.project, entry.publicUrl]),
-  ].join(" ").toLowerCase().includes(query)).sort((a, b) => Number(b.online) - Number(a.online) || a.id.localeCompare(b.id));
-  $("#deployment-workers").innerHTML = workers.length ? workers.map((worker) => {
-    const usage = deploymentWorkerUsage(worker);
-    const projects = (worker.projects ?? []).map((project) => `<span class="deployment-tag">${escapeHtml(project)}</span>`).join("") || '<span class="muted">等待新版心跳</span>';
-    const states = worker.projectStates?.length ? worker.projectStates : (worker.allocations ?? []).map((entry) => ({ ...entry, desiredStatus: "running" }));
-    const runtimes = states.map((entry) => {
-      const recovering = entry.restartPolicy !== "never" && entry.desiredStatus === "running" && entry.status !== "running";
-      const label = entry.status === "running" ? "运行中" : recovering ? "等待恢复" : entry.status === "not-deployed" ? "未部署" : "已停止";
-      return `<span class="deployment-tag"${entry.lastError ? ` title="${escapeHtml(entry.lastError)}"` : ""}>${escapeHtml(entry.project)} · ${label}</span>`;
-    }).join("") || '<span class="muted">无</span>';
-    const services = states.filter((entry) => entry.publicUrl).map((entry) => entry.status === "running"
-      ? `<a class="deployment-service-link" href="${escapeHtml(entry.publicUrl)}" target="_blank" rel="noopener"><i data-lucide="external-link"></i><span>${escapeHtml(entry.project)}</span></a>`
-      : `<span class="muted">${escapeHtml(entry.project)} · 未运行</span>`).join("") || '<span class="muted">未配置</span>';
-    const agent = worker.agent?.supervised ? "守护运行" : "前台运行";
-    return `<tr>
-      <td>${deploymentEntity("server", worker.id, (worker.labels ?? []).join(", ") || "无标签")}</td>
-      <td>${deploymentBadge(worker.online ? "online" : "offline", worker.online ? "在线" : "离线")}<div class="deployment-meta">${agent} · 负载 ${deploymentNumber(worker.metrics?.load1, 2)}</div></td>
-      <td><div class="deployment-resource"><strong>${deploymentNumber(usage.cpu, 1)} / ${deploymentNumber(worker.capacity?.cpu, 1)} CPU</strong><span>${deploymentNumber(usage.memoryMb)} / ${deploymentNumber(worker.capacity?.memoryMb)} MB · 磁盘可用 ${deploymentNumber(worker.metrics?.diskFreeMb)} MB</span></div></td>
-      <td><div class="badge-stack">${projects}</div></td><td><div class="badge-stack">${runtimes}</div></td><td><div class="deployment-services">${services}</div></td>
-      <td><strong>${relativeTime(worker.lastSeenAt)}</strong><div class="deployment-meta">${formatDate(worker.lastSeenAt, true)}</div></td>
-      <td><div class="deployment-row-actions"><button class="icon-button danger-icon" type="button" data-delete-deployment-worker="${escapeHtml(worker.id)}" title="删除节点" aria-label="删除节点 ${escapeHtml(worker.id)}"><i data-lucide="trash-2"></i></button></div></td>
-    </tr>`;
-  }).join("") : deploymentEmptyRow(8, query ? "没有匹配的节点" : (state.nodePool.available === false ? "节点池控制器不可用" : "尚未接入 Worker"));
-}
-
-function renderDeploymentJobs() {
-  const query = $("#deployment-job-search").value.trim().toLowerCase();
-  const status = $("#deployment-job-status").value;
-  const type = $("#deployment-job-type").value;
-  const jobs = [...(state.nodePool.jobs ?? [])].filter((job) => {
-    if (status && job.status !== status) return false;
-    if (type && job.type !== type) return false;
-    return !query || [job.id, job.project, job.ref, job.assignedWorkerId, job.preferredWorkerId].join(" ").toLowerCase().includes(query);
-  }).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-  $("#deployment-jobs").innerHTML = jobs.length ? jobs.map((job) => `<tr>
-    <td>${deploymentEntity("folder-git-2", job.project, job.id)}</td>
-    <td><strong>${escapeHtml(deploymentTypeLabels[job.type] ?? job.type)}</strong><div class="deployment-meta mono">${escapeHtml(job.ref || "-")}</div></td>
-    <td>${deploymentBadge(job.status)}<div class="deployment-meta">尝试 ${deploymentNumber(job.attempts)} / ${deploymentNumber(job.maxAttempts)}</div></td>
-    <td><strong>${escapeHtml(job.assignedWorkerId || job.preferredWorkerId || "自动选择")}</strong></td>
-    <td><strong>${deploymentNumber(job.requirements?.cpu, 1)} CPU</strong><div class="deployment-meta">${deploymentNumber(job.requirements?.memoryMb)} MB · ${escapeHtml((job.requirements?.labels ?? []).join(", ") || "无标签")}</div></td>
-    <td><strong>${formatDate(job.createdAt)}</strong><div class="deployment-meta">${job.finishedAt ? `完成 ${formatDate(job.finishedAt)}` : relativeTime(job.createdAt)}</div></td>
-    <td><div class="deployment-row-actions"><button class="icon-button" type="button" data-deployment-job-detail="${escapeHtml(job.id)}" title="查看详情" aria-label="查看详情"><i data-lucide="panel-right-open"></i></button>${job.status === "queued" ? `<button class="icon-button" type="button" data-cancel-deployment-job="${escapeHtml(job.id)}" title="取消任务" aria-label="取消任务"><i data-lucide="x-circle"></i></button>` : ""}</div></td>
-  </tr>`).join("") : deploymentEmptyRow(7, state.nodePool.available === false ? "节点池控制器不可用" : "没有匹配的部署任务");
-}
-
-function setDeploymentView(view, focus = true) {
-  if (!["overview", "workers", "jobs"].includes(view)) return;
-  state.deploymentView = view;
-  $$("[data-deployment-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.deploymentPanel === view));
-  $$(".deployment-tab").forEach((tab) => {
-    const active = tab.dataset.deploymentView === view;
-    tab.classList.toggle("active", active);
-    tab.setAttribute("aria-selected", String(active));
-  });
-  if (focus) $(`.deployment-tab[data-deployment-view="${view}"]`)?.focus();
-}
-
-function syncDeploymentJobType() {
-  const type = $("#deployment-job-form input[name=type]:checked").value;
-  const field = $("#deployment-job-ref-field");
-  field.hidden = type !== "deploy";
-  field.querySelector("input").required = type === "deploy";
-}
-
-function openDeploymentJobDialog() {
-  const form = $("#deployment-job-form");
-  form.reset();
-  $("#deployment-project-options").innerHTML = deploymentProjects().map((project) => `<option value="${escapeHtml(project)}"></option>`).join("");
-  $("#deployment-job-worker").innerHTML = '<option value="">自动选择</option>' + [...(state.nodePool.workers ?? [])]
-    .sort((a, b) => Number(b.online) - Number(a.online) || a.id.localeCompare(b.id))
-    .map((worker) => `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.id)}${worker.online ? " · 在线" : " · 离线"}</option>`).join("");
-  syncDeploymentJobType();
-  $("#deployment-job-dialog").showModal();
-  setTimeout(() => form.elements.project.focus(), 0);
-  icons();
-}
-
-function openWorkerTokenDialog() {
-  $("#worker-token-form").reset();
-  $("#worker-token-result").hidden = true;
-  $("#worker-token-value").value = "";
-  $("#worker-bundle-url").value = "";
-  $("#worker-install-command").value = "";
-  $("#worker-token-dialog").showModal();
-  setTimeout(() => $("#worker-token-form").elements.nodeId.focus(), 0);
-  icons();
-}
-
-function shellValue(value) {
-  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
-}
-
-function workerInstallCommand({ nodeId, token, bundleUrl, publicUrlTemplate }) {
-  const controllerUrl = new URL(bundleUrl);
-  controllerUrl.pathname = controllerUrl.pathname.replace(/\/api\/workers\/[^/]+\/bundle\/?$/, "");
-  controllerUrl.search = "";
-  controllerUrl.hash = "";
-  const controller = controllerUrl.toString().replace(/\/$/, "");
-  const directory = `.monkeycode-worker-${nodeId}`;
-  return `umask 077
-WORKER_DIR="$HOME/${directory}"
-mkdir -p "$WORKER_DIR"
-cd "$WORKER_DIR"
-export MK_WORKER_TOKEN=${shellValue(token)}
-export MK_PUBLIC_URL_TEMPLATE=${shellValue(publicUrlTemplate ?? "")}
-curl -fL -H "Authorization: Bearer \${MK_WORKER_TOKEN}" ${shellValue(bundleUrl)} -o monkeycode-node-pool.tar.gz
-tar -xzf monkeycode-node-pool.tar.gz
-if [ ! -f worker.config.json ]; then
-cat > worker.config.json <<EOF
-{
-  "version": 1,
-  "nodeId": ${JSON.stringify(nodeId)},
-  "controllerUrl": ${JSON.stringify(controller)},
-  "rootDir": "$WORKER_DIR/data",
-  "publicUrlTemplate": ${JSON.stringify(publicUrlTemplate ?? "")},
-  "capacity": {
-    "cpu": 1,
-    "memoryMb": 2048,
-    "diskMb": 10240
-  },
-  "labels": ["node"],
-  "pollIntervalSeconds": 5,
-  "heartbeatIntervalSeconds": 15,
-  "reconcileIntervalSeconds": 15,
-  "recovery": {
-    "initialDelaySeconds": 5,
-    "maxDelaySeconds": 300,
-    "healthFailureThreshold": 3
-  },
-  "projects": {}
-}
-EOF
-fi
-node --input-type=module <<'NODE'
-import { readFile, writeFile } from "node:fs/promises";
-const file = "worker.config.json";
-const config = JSON.parse(await readFile(file, "utf8"));
-if (process.env.MK_PUBLIC_URL_TEMPLATE) config.publicUrlTemplate = process.env.MK_PUBLIC_URL_TEMPLATE;
-config.reconcileIntervalSeconds ??= 15;
-config.recovery ??= { initialDelaySeconds: 5, maxDelaySeconds: 300, healthFailureThreshold: 3 };
-await writeFile(file, \`\${JSON.stringify(config, null, 2)}\\n\`, { mode: 0o600 });
-NODE
-export MK_WORKER_CONFIG="$WORKER_DIR/worker.config.json"
-npm run service -- install
-unset MK_WORKER_TOKEN MK_PUBLIC_URL_TEMPLATE
-npm run service -- status`;
-}
-
-function publicUrlTemplateFromSample(value) {
-  const raw = String(value ?? "").trim();
-  if (!raw) return null;
-  if (raw.includes("{port}")) {
-    const rendered = new URL(raw.replaceAll("{port}", "39080"));
-    if (!["http:", "https:"].includes(rendered.protocol) || rendered.username || rendered.password || rendered.search || rendered.hash) throw new Error("端口公网地址格式不正确");
-    return raw.replace(/\/+$/, "");
-  }
-  const url = new URL(raw);
-  const match = url.hostname.match(/^\d+-(.+)$/);
-  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== "/" || !match) {
-    throw new Error("请填写端口开头的完整公网地址");
-  }
-  return `${url.protocol}//{port}-${match[1]}${url.port ? `:${url.port}` : ""}`;
-}
-
-function openDeploymentDetail(jobId) {
-  const job = (state.nodePool.jobs ?? []).find((entry) => entry.id === jobId);
-  if (!job) return;
-  $("#deployment-detail-title").textContent = `${deploymentTypeLabels[job.type] ?? job.type} · ${job.project}`;
-  const items = [
-    ["任务 ID", job.id], ["状态", deploymentStatusLabels[job.status] ?? job.status], ["Git 引用", job.ref || "-"],
-    ["执行节点", job.assignedWorkerId || job.preferredWorkerId || "自动选择"], ["创建时间", formatDate(job.createdAt, true)], ["完成时间", formatDate(job.finishedAt, true)],
-  ];
-  if (job.result?.publicUrl) items.push(["公网地址", job.result.publicUrl]);
-  $("#deployment-detail-list").innerHTML = items.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("");
-  $("#deployment-detail-output").textContent = JSON.stringify(job.error ? { error: job.error } : job.result ?? { message: "暂无执行结果" }, null, 2);
-  $("#deployment-detail-dialog").showModal();
-  icons();
-}
-
-async function copyDeploymentValue(id) {
-  const input = document.getElementById(id);
-  if (!input?.value) return;
-  try {
-    await navigator.clipboard.writeText(input.value);
-  } catch {
-    input.select();
-    document.execCommand("copy");
-    input.setSelectionRange(0, 0);
-  }
-  toast("已复制");
-}
 
 function renderTaskList() {
   const container = $("#task-list");
@@ -1103,7 +823,7 @@ function openNotificationDialog(id = null) {
   state.selectedNotificationId = channel?.id ?? null;
   $("#notification-dialog-title").textContent = channel ? "编辑通知渠道" : "添加通知渠道";
   const type = channel?.type ?? "generic";
-  const defaults = ["failed", "auth-expired", "session-warning", "auto-login-failed", "auto-login-recovered", "quota-low", "remote-task-error", "remote-task-missing", "sync-failed", "node-pool-unavailable", "node-offline", "deployment-failed", "deployment-backlog"];
+  const defaults = ["failed", "auth-expired", "session-warning", "auto-login-failed", "auto-login-recovered", "quota-low", "remote-task-error", "remote-task-missing", "sync-failed"];
   $("#notification-fields").innerHTML = `<div class="form-grid"><label class="field"><span>渠道名称</span><input name="name" maxlength="80" value="${escapeHtml(channel?.name ?? "")}" required></label><label class="field"><span>渠道类型</span><select id="notification-type" name="type" ${channel ? "disabled" : ""}>${Object.entries(notificationLabels).map(([value, label]) => `<option value="${value}" ${type === value ? "selected" : ""}>${label}</option>`).join("")}</select>${channel ? `<input type="hidden" name="type" value="${type}">` : ""}</label></div><div id="notification-type-fields"></div><div class="field"><span>通知事件</span><div class="event-check-grid">${Object.entries(notificationEventLabels).map(([event, label]) => `<label class="event-check"><input type="checkbox" name="event" value="${event}" ${(channel?.events ?? defaults).includes(event) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("")}</div></div><div class="toggle-row"><div><strong>启用渠道</strong><small>保存后立即生效</small></div><label class="switch"><input type="checkbox" name="enabled" ${channel?.enabled !== false ? "checked" : ""}><span></span></label></div>`;
   renderNotificationTypeFields(type, channel);
   $("#notification-dialog").showModal();
@@ -1179,11 +899,6 @@ function showPage(page) {
     primary.title = "添加账号";
     primary.setAttribute("aria-label", "添加账号");
     primary.innerHTML = '<i data-lucide="user-plus"></i><span>添加账号</span>';
-  } else if (page === "deployments") {
-    primary.hidden = false;
-    primary.title = "新建部署任务";
-    primary.setAttribute("aria-label", "新建部署任务");
-    primary.innerHTML = '<i data-lucide="rocket"></i><span>新建部署</span>';
   } else if (page === "settings") {
     primary.hidden = false;
     primary.title = "添加通知";
@@ -1261,34 +976,6 @@ document.addEventListener("click", async (event) => {
     showPage(nav.dataset.page || nav.dataset.pageLink);
     loadData().catch((error) => toast(error.message, "error"));
   }
-
-  const deploymentView = event.target.closest("[data-deployment-view]");
-  if (deploymentView) setDeploymentView(deploymentView.dataset.deploymentView);
-  const deploymentDetail = event.target.closest("[data-deployment-job-detail]");
-  if (deploymentDetail) openDeploymentDetail(deploymentDetail.dataset.deploymentJobDetail);
-  const cancelDeployment = event.target.closest("[data-cancel-deployment-job]");
-  if (cancelDeployment && await confirmAction("取消部署任务", "该任务仍在排队，取消后不会分配给 Worker。", "取消任务")) {
-    try {
-      await api(`/api/node-pool/jobs/${encodeURIComponent(cancelDeployment.dataset.cancelDeploymentJob)}/cancel`, { method: "POST", body: {} });
-      await loadData();
-      toast("部署任务已取消");
-    } catch (error) { toast(error.message, "error"); }
-  }
-  const deleteDeploymentWorker = event.target.closest("[data-delete-deployment-worker]");
-  if (deleteDeploymentWorker) {
-    const nodeId = deleteDeploymentWorker.dataset.deleteDeploymentWorker;
-    const worker = state.nodePool.workers?.find((entry) => entry.id === nodeId);
-    const message = `确定删除节点“${nodeId}”吗？节点凭证将立即失效，且不会再参与调度。该操作不会停止节点内已经运行的项目。${worker?.online ? " 当前节点在线，删除后 Worker 会断开。" : ""}`;
-    if (await confirmAction("删除节点", message, "删除节点")) {
-      try {
-        await api(`/api/node-pool/workers/${encodeURIComponent(nodeId)}`, { method: "DELETE" });
-        await loadData();
-        toast("节点已删除");
-      } catch (error) { toast(error.message, "error"); }
-    }
-  }
-  const copyDeployment = event.target.closest("[data-copy-target]");
-  if (copyDeployment) copyDeploymentValue(copyDeployment.dataset.copyTarget);
 
   const openTask = event.target.closest("[data-open-task]");
   if (openTask) {
@@ -1548,56 +1235,7 @@ $("#refresh-button").addEventListener("click", () => loadData().then(() => toast
 $("#primary-action").addEventListener("click", () => {
   if (state.page === "settings") return;
   if (state.page === "accounts") { openAccountDialog(); return; }
-  if (state.page === "deployments") { openDeploymentJobDialog(); return; }
   state.taskFormDirty = false; state.newTaskSeed = null; state.newTask = true; state.selectedTaskId = null; showPage("tasks"); renderTaskList(); renderTaskEditor(); icons();
-});
-$("#issue-worker-token").addEventListener("click", openWorkerTokenDialog);
-$("#deployment-worker-search").addEventListener("input", () => { renderDeploymentWorkers(); icons(); });
-[$("#deployment-job-search"), $("#deployment-job-status"), $("#deployment-job-type")].forEach((element) => element.addEventListener("input", () => { renderDeploymentJobs(); icons(); }));
-$("#deployment-job-form").addEventListener("change", (event) => { if (event.target.name === "type") syncDeploymentJobType(); });
-$("#deployment-job-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = Object.fromEntries(new FormData(form));
-  const body = {
-    type: data.type,
-    project: data.project.trim(),
-    ref: data.type === "deploy" ? data.ref.trim() : undefined,
-    preferredWorkerId: data.preferredWorkerId || undefined,
-    priority: Number(data.priority),
-    requirements: {
-      cpu: Number(data.cpu),
-      memoryMb: Number(data.memoryMb),
-      labels: data.labels.split(",").map((item) => item.trim()).filter(Boolean),
-    },
-  };
-  const submit = form.querySelector('button[type="submit"]');
-  submit.disabled = true;
-  try {
-    await api("/api/node-pool/jobs", { method: "POST", body });
-    $("#deployment-job-dialog").close();
-    await loadData();
-    setDeploymentView("jobs", false);
-    toast("部署任务已进入调度队列");
-  } catch (error) { toast(error.message, "error"); }
-  finally { submit.disabled = false; }
-});
-$("#worker-token-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const submit = form.querySelector('button[type="submit"]');
-  submit.disabled = true;
-  try {
-    const formData = new FormData(form);
-    const publicUrlTemplate = publicUrlTemplateFromSample(formData.get("publicUrlSample"));
-    const result = await api("/api/node-pool/workers/token", { method: "POST", body: { nodeId: formData.get("nodeId").trim() } });
-    $("#worker-token-value").value = result.token;
-    $("#worker-bundle-url").value = result.bundleUrl;
-    $("#worker-install-command").value = workerInstallCommand({ ...result, publicUrlTemplate });
-    $("#worker-token-result").hidden = false;
-    icons();
-  } catch (error) { toast(error.message, "error"); }
-  finally { submit.disabled = false; }
 });
 $("#add-task-icon").addEventListener("click", () => { state.taskFormDirty = false; state.newTaskSeed = null; state.newTask = true; state.selectedTaskId = null; renderTaskList(); renderTaskEditor(); icons(); });
 $("#task-editor").addEventListener("submit", saveTask);

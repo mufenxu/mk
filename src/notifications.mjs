@@ -20,10 +20,6 @@ function messageFor(event, context) {
     "environment-hibernated": "任务环境已休眠",
     "remote-task-missing": "远端任务未找到",
     "sync-failed": "远端同步失败",
-    "node-pool-unavailable": "节点池控制器不可用",
-    "node-offline": "部署节点离线",
-    "deployment-failed": "项目部署失败",
-    "deployment-backlog": "部署队列积压",
     test: "通知测试成功",
   };
   const title = `MonkeyCode · ${labels[event] ?? event}`;

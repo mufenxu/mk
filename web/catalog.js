@@ -7,7 +7,6 @@
       tasks: ["任务管理", "配置发送内容、账号与日程"],
       remote: ["远端任务", "账号任务、模型用量与环境状态"],
       accounts: ["账号管理", "集中维护 MonkeyCode 登录凭证"],
-      deployments: ["项目部署", "跨 MonkeyCode 环境调度普通项目"],
       history: ["执行记录", "查看每次调度与通知结果"],
       settings: ["系统设置", "全局调度、通知与备份"],
     },
@@ -51,10 +50,6 @@
       "environment-hibernated": "环境已休眠",
       "remote-task-missing": "远端任务未找到",
       "sync-failed": "同步失败",
-      "node-pool-unavailable": "节点池不可用",
-      "node-offline": "部署节点离线",
-      "deployment-failed": "项目部署失败",
-      "deployment-backlog": "部署队列积压",
     },
     notificationLabels: {
       generic: "通用 Webhook",
@@ -81,19 +76,6 @@
       "environment-hibernated": "环境休眠",
       "remote-task-missing": "任务丢失",
       "sync-failed": "同步失败",
-      "node-pool-unavailable": "节点池不可用",
-      "node-offline": "部署节点离线",
-      "deployment-failed": "项目部署失败",
-      "deployment-backlog": "部署队列积压",
     },
-    deploymentStatusLabels: {
-      queued: "排队",
-      leased: "执行中",
-      completed: "已完成",
-      failed: "失败",
-      cancelled: "已取消",
-    },
-    deploymentTypeLabels: { deploy: "部署", start: "启动", stop: "停止", restart: "重启" },
-    deploymentTypeIcons: { deploy: "rocket", start: "play", stop: "square", restart: "rotate-cw" },
   });
 })(window);

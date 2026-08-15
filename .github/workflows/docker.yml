@@ -1,4 +1,4 @@
-name: Build and publish Docker images
+name: Build and publish Docker image
 
 on:
   push:
@@ -71,43 +71,6 @@ jobs:
           docker logs monkeycode-smoke
           exit 1
 
-      - name: Check Node Pool sources in Docker
-        run: docker build --target test --tag monkeycode-node-pool-test:${GITHUB_SHA} services/node-pool
-
-      - name: Build Node Pool production image
-        shell: bash
-        run: |
-          node_pool_source_image="${IMAGE_NAME_LOWER}:node-pool-sha-${SHORT_SHA}"
-          docker build \
-            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --tag "${node_pool_source_image}" \
-            services/node-pool
-          echo "NODE_POOL_SOURCE_IMAGE=${node_pool_source_image}" >> "${GITHUB_ENV}"
-
-      - name: Smoke test Node Pool image
-        shell: bash
-        run: |
-          cleanup() {
-            docker rm --force monkeycode-node-pool-smoke >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-          docker run --detach \
-            --name monkeycode-node-pool-smoke \
-            --publish 127.0.0.1:4191:4191 \
-            --env MK_ADMIN_TOKEN=smoke-test-admin-token-1234567890 \
-            --env MK_WORKER_SECRET=smoke-test-worker-secret-12345678901234567890 \
-            "${NODE_POOL_SOURCE_IMAGE}"
-          for attempt in {1..20}; do
-            if curl --fail --silent --show-error http://127.0.0.1:4191/readyz; then
-              SMOKE_ADMIN_TOKEN=smoke-test-admin-token-1234567890 node services/node-pool/scripts/smoke-controller.mjs http://127.0.0.1:4191
-              exit 0
-            fi
-            sleep 1
-          done
-          docker logs monkeycode-node-pool-smoke
-          exit 1
-
       - name: Check ACR credentials
         id: acr
         if: github.event_name != 'pull_request'
@@ -135,19 +98,14 @@ jobs:
         run: |
           source_image="${IMAGE_NAME_LOWER}:sha-${SHORT_SHA}"
           docker push "${source_image}"
-          docker push "${NODE_POOL_SOURCE_IMAGE}"
 
           if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
             docker tag "${source_image}" "${IMAGE_NAME_LOWER}:latest"
-            docker tag "${NODE_POOL_SOURCE_IMAGE}" "${IMAGE_NAME_LOWER}:node-pool-latest"
             docker push "${IMAGE_NAME_LOWER}:latest"
-            docker push "${IMAGE_NAME_LOWER}:node-pool-latest"
           fi
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             version="${GITHUB_REF_NAME#v}"
             docker tag "${source_image}" "${IMAGE_NAME_LOWER}:${version}"
-            docker tag "${NODE_POOL_SOURCE_IMAGE}" "${IMAGE_NAME_LOWER}:node-pool-${version}"
             docker push "${IMAGE_NAME_LOWER}:${version}"
-            docker push "${IMAGE_NAME_LOWER}:node-pool-${version}"
           fi
