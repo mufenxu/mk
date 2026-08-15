@@ -7,6 +7,7 @@ import { BrowserBridgeService } from "./browser-bridge.mjs";
 import { EnvironmentKeeper } from "./environment-keeper.mjs";
 import { ConfigError } from "./errors.mjs";
 import { NotificationService } from "./notifications.mjs";
+import { OidcAuthService } from "./oidc-auth.mjs";
 import { RemoteSyncService } from "./remote-sync.mjs";
 import { TaskRunner } from "./runner.mjs";
 import { parseMasterKey } from "./security.mjs";
@@ -15,8 +16,31 @@ import { DataStore } from "./storage.mjs";
 
 function panelConfig(env = process.env) {
   const password = env.MONKEYCODE_PANEL_PASSWORD;
-  if (!password || password.length < 12) {
+  const oidcRequested = Boolean(env.MY_CLIENT_ID?.trim() || env.MY_CLIENT_SECRET?.trim());
+  if (!oidcRequested && (!password || password.length < 12)) {
     throw new ConfigError("MONKEYCODE_PANEL_PASSWORD must contain at least 12 characters");
+  }
+  let oidc = null;
+  if (oidcRequested) {
+    const clientId = env.MY_CLIENT_ID?.trim();
+    const clientSecret = env.MY_CLIENT_SECRET?.trim();
+    const redirectUri = env.MY_REDIRECT_URI?.trim();
+    const sessionSecret = env.SESSION_SECRET?.trim();
+    const issuer = (env.MY_ISSUER?.trim() || "https://pxyb.cn").replace(/\/$/, "");
+    const requiredRole = env.MY_REQUIRED_ROLE?.trim() || "super_admin";
+    if (!clientId || !clientSecret || !redirectUri || !sessionSecret) {
+      throw new ConfigError("MY_CLIENT_ID, MY_CLIENT_SECRET, MY_REDIRECT_URI and SESSION_SECRET are required for MY OIDC login");
+    }
+    if (sessionSecret.length < 32) throw new ConfigError("SESSION_SECRET must contain at least 32 characters");
+    if (!new Set(["viewer", "operator", "super_admin"]).has(requiredRole)) {
+      throw new ConfigError("MY_REQUIRED_ROLE must be viewer, operator or super_admin");
+    }
+    try {
+      if (new URL(issuer).protocol !== "https:" || new URL(redirectUri).protocol !== "https:") throw new Error();
+    } catch {
+      throw new ConfigError("MY_ISSUER and MY_REDIRECT_URI must be valid HTTPS URLs");
+    }
+    oidc = { issuer, clientId, clientSecret, redirectUri, sessionSecret, requiredRole };
   }
   const port = Number(env.MONKEYCODE_PANEL_PORT || 4180);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ConfigError("MONKEYCODE_PANEL_PORT is invalid");
@@ -28,6 +52,7 @@ function panelConfig(env = process.env) {
     port,
     secureCookie: env.MONKEYCODE_SECURE_COOKIE === "true",
     browserBridgeEnabled: env.MONKEYCODE_BROWSER_BRIDGE_ENABLED === "true",
+    oidc,
   };
 }
 
@@ -40,7 +65,8 @@ try {
   const environmentKeeper = new EnvironmentKeeper(store);
   const remoteSync = new RemoteSyncService(store, notifications);
   const browserBridge = config.browserBridgeEnabled ? new BrowserBridgeService(store) : null;
-  const server = new PanelServer({ ...config, store, notifications, runner, browserBridge, remoteSync, environmentKeeper, autoLogin });
+  const oidc = config.oidc ? new OidcAuthService(config.oidc) : null;
+  const server = new PanelServer({ ...config, store, notifications, runner, browserBridge, remoteSync, environmentKeeper, autoLogin, oidc });
   await environmentKeeper.start();
   const address = await server.listen();
   autoLogin.start();

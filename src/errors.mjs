@@ -35,3 +35,12 @@ export class BridgeError extends Error {
     this.code = code;
   }
 }
+
+export class OidcAuthError extends Error {
+  constructor(message, status = 400, code = "oidc-authentication-failed") {
+    super(message);
+    this.name = "OidcAuthError";
+    this.status = status;
+    this.code = code;
+  }
+}

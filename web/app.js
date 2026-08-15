@@ -2,6 +2,8 @@
 
 const state = {
   csrf: "",
+  authMode: "password",
+  loginUrl: "/auth/my/start",
   page: "overview",
   overview: null,
   accounts: [],
@@ -65,7 +67,7 @@ async function api(path, options = {}) {
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
   if (response.status === 401 && path !== "/api/auth/login") {
-    showLogin();
+    showLogin({ mode: state.authMode, loginUrl: state.loginUrl });
     throw new Error("管理会话已失效，请重新登录");
   }
   const payload = await response.json().catch(() => ({}));
@@ -73,11 +75,18 @@ async function api(path, options = {}) {
   return payload;
 }
 
-function showLogin() {
+function showLogin(auth = {}) {
+  state.authMode = auth.mode ?? state.authMode;
+  state.loginUrl = auth.loginUrl ?? state.loginUrl;
+  const oidc = state.authMode === "oidc";
   $("#app").hidden = true;
   $("#login-view").hidden = false;
+  $("#password-login-fields").hidden = oidc;
+  $("#oidc-login").hidden = !oidc;
+  $("#oidc-login").href = state.loginUrl;
+  $("#login-password").required = !oidc;
   $("#login-password").value = "";
-  setTimeout(() => $("#login-password").focus(), 0);
+  if (!oidc) setTimeout(() => $("#login-password").focus(), 0);
   icons();
 }
 
@@ -1227,8 +1236,8 @@ $("#login-form").addEventListener("submit", async (event) => {
 });
 
 $("#logout-button").addEventListener("click", async () => {
-  try { await api("/api/auth/logout", { method: "POST" }); } catch { /* session may already be gone */ }
-  state.csrf = ""; showLogin();
+  try { await api("/auth/logout", { method: "POST" }); } catch { /* session may already be gone */ }
+  state.csrf = ""; showLogin({ mode: state.authMode, loginUrl: state.loginUrl });
 });
 
 $("#refresh-button").addEventListener("click", () => loadData().then(() => toast("数据已刷新")).catch((error) => toast(error.message, "error")));
@@ -1383,14 +1392,30 @@ async function boot() {
   icons();
   try {
     const auth = await api("/api/auth/status");
-    if (!auth.authenticated) { showLogin(); return; }
+    state.authMode = auth.mode ?? "password";
+    state.loginUrl = auth.loginUrl ?? "/auth/my/start";
+    if (!auth.authenticated) {
+      showLogin(auth);
+      const authError = new URLSearchParams(location.search).get("auth_error");
+      if (authError) {
+        const messages = {
+          "oidc-authorization-denied": "统一认证未完成，请重试。",
+          "oidc-role-insufficient": "当前 MY 账号无权访问 MonkeyCode。",
+          "oidc-state-invalid": "登录请求已失效，请重新发起。",
+          "oidc-not-configured": "统一认证尚未完成配置。",
+        };
+        $("#login-error").textContent = messages[authError] ?? "统一认证失败，请重试。";
+        history.replaceState(null, "", `${location.pathname}${location.hash}`);
+      }
+      return;
+    }
     state.csrf = auth.csrf;
     showApp();
     const initialPage = location.hash.slice(1);
     showPage(pageMeta[initialPage] ? initialPage : "overview");
     await loadData();
   } catch (error) {
-    showLogin();
+    showLogin({ mode: state.authMode, loginUrl: state.loginUrl });
     $("#login-error").textContent = error.message;
   }
 }

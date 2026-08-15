@@ -22,7 +22,7 @@
 - 执行日志筛选、CSV 导出、配置导入导出和最近 30 份自动备份。
 - 响应式桌面与手机界面。
 
-Cookie 和通知密钥使用 AES-256-GCM 加密保存。浏览器桥接令牌在 VPS 上只保存 SHA-256 哈希；管理 API 不返回原始密钥，面板写操作使用 HttpOnly 管理会话和 CSRF 校验。
+Cookie 和通知密钥使用 AES-256-GCM 加密保存。浏览器桥接令牌在 VPS 上只保存 SHA-256 哈希；管理 API 不返回原始密钥，面板通过 MY OIDC Authorization Code + PKCE 登录，写操作继续使用 HttpOnly 管理会话和 CSRF 校验。
 
 ## VPS 部署
 
@@ -37,11 +37,11 @@ sudo npm ci --omit=dev
 sudo chown -R root:root /opt/monkeycode-daily
 ```
 
-生成独立的主密钥和管理密码。主密钥一旦丢失，已有 Cookie 和通知凭证无法解密。
+生成独立的主密钥和会话密钥。主密钥一旦丢失，已有 Cookie 和通知凭证无法解密。
 
 ```bash
 openssl rand -base64 32
-openssl rand -base64 24
+openssl rand -base64 32
 sudoedit /etc/monkeycode-panel.env
 ```
 
@@ -50,10 +50,15 @@ sudoedit /etc/monkeycode-panel.env
 ```dotenv
 MONKEYCODE_PANEL_HOST=127.0.0.1
 MONKEYCODE_PANEL_PORT=4180
-MONKEYCODE_PANEL_PASSWORD=填写第二条命令生成的管理密码
 MONKEYCODE_MASTER_KEY=填写第一条命令生成的32字节主密钥
 MONKEYCODE_SECURE_COOKIE=true
 MONKEYCODE_BROWSER_BRIDGE_ENABLED=true
+MY_ISSUER=https://pxyb.cn
+MY_CLIENT_ID=从 MY 控制台复制
+MY_CLIENT_SECRET=从 MY 控制台创建后立即保存
+MY_REDIRECT_URI=https://mk.pxyb.cn/auth/my/callback
+MY_REQUIRED_ROLE=super_admin
+SESSION_SECRET=填写第二条命令生成的会话密钥
 ```
 
 ```bash
@@ -72,6 +77,19 @@ sudo systemctl disable --now monkeycode-daily.timer 2>/dev/null || true
 ```
 
 ### 访问面板
+
+先在 MY 控制台的“服务目录 → 外部应用”创建应用：
+
+```text
+应用名称：MonkeyCode 调度台
+启动地址：https://mk.pxyb.cn/auth/my/start
+回调地址：https://mk.pxyb.cn/auth/my/callback
+健康检查地址：https://mk.pxyb.cn/health
+最低访问角色：super_admin
+Android 打开方式：webview
+```
+
+`client_secret` 只写入 VPS 环境文件，不得提交到 Git。配置 MY OIDC 后，原管理密码登录自动停用；只有未设置 `MY_CLIENT_ID` 和 `MY_CLIENT_SECRET` 时才使用 `MONKEYCODE_PANEL_PASSWORD` 作为本地兼容登录。
 
 默认只监听 VPS 的 `127.0.0.1`。仅使用手工 Cookie 时可以通过 SSH 隧道访问：
 
@@ -175,10 +193,15 @@ crpi-ijf5w3rczq2vwnig.cn-beijing.personal.cr.aliyuncs.com/mufenxu/my
 VPS 在 `compose.yaml` 同目录创建唯一的真实配置文件 `.env`，可直接以 [`.env.example`](.env.example) 为变量清单。至少填写：
 
 ```dotenv
-MONKEYCODE_PANEL_PASSWORD=填写至少12位的管理密码
 MONKEYCODE_MASTER_KEY=填写32字节Base64主密钥
 MONKEYCODE_SECURE_COOKIE=true
 MONKEYCODE_BROWSER_BRIDGE_ENABLED=true
+MY_ISSUER=https://pxyb.cn
+MY_CLIENT_ID=从 MY 控制台复制
+MY_CLIENT_SECRET=从 MY 控制台创建后立即保存
+MY_REDIRECT_URI=https://mk.pxyb.cn/auth/my/callback
+MY_REQUIRED_ROLE=super_admin
+SESSION_SECRET=填写至少32字符的独立随机值
 ```
 
 容器内监听地址、端口和数据目录由 `compose.yaml` 固定为 `0.0.0.0:4180` 和 `/data`。宿主机只监听 `127.0.0.1:4180`，继续由 Nginx 提供公网 HTTPS。

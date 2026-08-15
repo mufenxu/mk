@@ -4,13 +4,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isExtensionOrigin } from "./browser-bridge.mjs";
-import { AuthExpiredError, BridgeError, ConfigError, RemoteError } from "./errors.mjs";
+import { AuthExpiredError, BridgeError, ConfigError, OidcAuthError, RemoteError } from "./errors.mjs";
 import { createToken, verifyPassword } from "./security.mjs";
 import { StaticAssets } from "./static-assets.mjs";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.resolve(moduleDir, "..", "web");
 const SESSION_COOKIE = "monkeycode_panel_session";
+const OIDC_STATE_COOKIE = "monkeycode_oidc_state";
 
 function json(response, status, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
@@ -21,6 +22,15 @@ function json(response, status, payload, extraHeaders = {}) {
     ...extraHeaders,
   });
   response.end(body);
+}
+
+function redirect(response, location, extraHeaders = {}) {
+  response.writeHead(302, {
+    Location: location,
+    "Cache-Control": "no-store",
+    ...extraHeaders,
+  });
+  response.end();
 }
 
 function parseCookies(header = "") {
@@ -75,6 +85,7 @@ export class PanelServer {
     this.runner = options.runner;
     this.notifications = options.notifications;
     this.password = options.password;
+    this.oidc = options.oidc ?? null;
     this.host = options.host;
     this.port = options.port;
     this.secureCookie = options.secureCookie;
@@ -104,6 +115,25 @@ export class PanelServer {
     }
     session.expiresAt = Date.now() + 12 * 60 * 60_000;
     return { token, ...session };
+  }
+
+  sessionCookie(token, maxAge = 12 * 60 * 60) {
+    const flags = [`${SESSION_COOKIE}=${token}`, "HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${maxAge}`];
+    if (this.secureCookie) flags.push("Secure");
+    return flags.join("; ");
+  }
+
+  oidcStateCookie(value, maxAge = 10 * 60) {
+    const flags = [`${OIDC_STATE_COOKIE}=${value}`, "HttpOnly", "SameSite=Lax", "Path=/auth/my/callback", `Max-Age=${maxAge}`];
+    if (this.secureCookie) flags.push("Secure");
+    return flags.join("; ");
+  }
+
+  createSession(user) {
+    const token = createToken();
+    const csrf = createToken(24);
+    this.sessions.set(token, { csrf, user, expiresAt: Date.now() + 12 * 60 * 60_000 });
+    return { token, csrf };
   }
 
   requireAuth(request, response) {
@@ -136,6 +166,53 @@ export class PanelServer {
     securityHeaders(response);
     const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
     try {
+      if (url.pathname === "/health" && request.method === "GET") {
+        json(response, 200, { ok: true });
+        return;
+      }
+
+      if (url.pathname === "/auth/my/start" && request.method === "GET") {
+        if (!this.oidc) {
+          redirect(response, "/?auth_error=oidc-not-configured");
+          return;
+        }
+        if (this.sessionFor(request)) {
+          redirect(response, "/");
+          return;
+        }
+        const started = await this.oidc.start();
+        redirect(response, started.authorizationUrl.href, { "Set-Cookie": this.oidcStateCookie(started.stateCookie) });
+        return;
+      }
+
+      if (url.pathname === "/auth/my/callback" && request.method === "GET") {
+        const clearStateCookie = this.oidcStateCookie("", 0);
+        if (!this.oidc) {
+          redirect(response, "/?auth_error=oidc-not-configured", { "Set-Cookie": clearStateCookie });
+          return;
+        }
+        try {
+          const user = await this.oidc.callback(url.searchParams, parseCookies(request.headers.cookie)[OIDC_STATE_COOKIE]);
+          const previousSession = this.sessionFor(request);
+          if (previousSession) this.sessions.delete(previousSession.token);
+          const session = this.createSession(user);
+          redirect(response, "/", { "Set-Cookie": [this.sessionCookie(session.token), clearStateCookie] });
+        } catch (error) {
+          const code = error instanceof OidcAuthError ? error.code : "oidc-authentication-failed";
+          if (!(error instanceof OidcAuthError)) console.error("OIDC callback failed", error?.name ?? "Error");
+          redirect(response, `/?auth_error=${encodeURIComponent(code)}`, { "Set-Cookie": clearStateCookie });
+        }
+        return;
+      }
+
+      if (url.pathname === "/auth/logout" && request.method === "POST") {
+        const session = this.requireAuth(request, response);
+        if (!session) return;
+        this.sessions.delete(session.token);
+        json(response, 200, { ok: true }, { "Set-Cookie": this.sessionCookie("", 0) });
+        return;
+      }
+
       if (!url.pathname.startsWith("/api/")) {
         if (await this.staticAssets.serve(request, response, url.pathname)) return;
         json(response, 404, { error: "not-found" });
@@ -200,10 +277,18 @@ export class PanelServer {
 
       if (url.pathname === "/api/auth/status" && request.method === "GET") {
         const session = this.sessionFor(request);
-        json(response, 200, session ? { authenticated: true, csrf: session.csrf } : { authenticated: false });
+        json(response, 200, session
+          ? { authenticated: true, csrf: session.csrf }
+          : this.oidc
+            ? { authenticated: false, mode: "oidc", loginUrl: "/auth/my/start" }
+            : { authenticated: false });
         return;
       }
       if (url.pathname === "/api/auth/login" && request.method === "POST") {
+        if (this.oidc) {
+          json(response, 409, { error: "oidc-login-required" });
+          return;
+        }
         const address = request.socket.remoteAddress ?? "unknown";
         if (!this.loginAllowed(address)) {
           json(response, 429, { error: "too-many-login-attempts" });
@@ -216,12 +301,8 @@ export class PanelServer {
           return;
         }
         this.loginAttempts.delete(address);
-        const token = createToken();
-        const csrf = createToken(24);
-        this.sessions.set(token, { csrf, expiresAt: Date.now() + 12 * 60 * 60_000 });
-        const flags = [`${SESSION_COOKIE}=${token}`, "HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=43200"];
-        if (this.secureCookie) flags.push("Secure");
-        json(response, 200, { authenticated: true, csrf }, { "Set-Cookie": flags.join("; ") });
+        const session = this.createSession({ sub: "local-admin", username: "local-admin", role: "super_admin" });
+        json(response, 200, { authenticated: true, csrf: session.csrf }, { "Set-Cookie": this.sessionCookie(session.token) });
         return;
       }
 
@@ -230,9 +311,7 @@ export class PanelServer {
 
       if (url.pathname === "/api/auth/logout" && request.method === "POST") {
         this.sessions.delete(session.token);
-        const flags = [`${SESSION_COOKIE}=`, "HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=0"];
-        if (this.secureCookie) flags.push("Secure");
-        json(response, 200, { ok: true }, { "Set-Cookie": flags.join("; ") });
+        json(response, 200, { ok: true }, { "Set-Cookie": this.sessionCookie("", 0) });
         return;
       }
 
@@ -564,6 +643,8 @@ export class PanelServer {
       if (response.headersSent) {
         response.destroy();
       } else if (error instanceof BridgeError) {
+        json(response, error.status, { error: error.code, message: error.message });
+      } else if (error instanceof OidcAuthError) {
         json(response, error.status, { error: error.code, message: error.message });
       } else if (error instanceof AuthExpiredError) {
         json(response, 422, { error: "auth-expired", message: error.message });

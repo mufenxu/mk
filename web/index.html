@@ -18,15 +18,18 @@
         <h1>登录控制台</h1>
         <p>管理定时发送、凭证和执行记录。</p>
       </div>
-      <label class="field">
-        <span>管理密码</span>
-        <span class="password-wrap">
-          <input id="login-password" name="password" type="password" autocomplete="current-password" required autofocus>
-          <button class="icon-button password-toggle" type="button" data-toggle-password="login-password" title="显示密码" aria-label="显示密码"><i data-lucide="eye"></i></button>
-        </span>
-      </label>
+      <div id="password-login-fields" class="login-fields">
+        <label class="field">
+          <span>管理密码</span>
+          <span class="password-wrap">
+            <input id="login-password" name="password" type="password" autocomplete="current-password" required autofocus>
+            <button class="icon-button password-toggle" type="button" data-toggle-password="login-password" title="显示密码" aria-label="显示密码"><i data-lucide="eye"></i></button>
+          </span>
+        </label>
+        <button class="button primary wide" type="submit"><i data-lucide="log-in"></i><span>登录</span></button>
+      </div>
+      <a id="oidc-login" class="button primary wide" href="/auth/my/start" hidden><i data-lucide="log-in"></i><span>使用 MY 统一登录</span></a>
       <p id="login-error" class="form-error" role="alert"></p>
-      <button class="button primary wide" type="submit"><i data-lucide="log-in"></i><span>登录</span></button>
     </form>
   </section>
 
