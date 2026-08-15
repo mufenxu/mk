@@ -78,15 +78,17 @@ async function api(path, options = {}) {
 function showLogin(auth = {}) {
   state.authMode = auth.mode ?? state.authMode;
   state.loginUrl = auth.loginUrl ?? state.loginUrl;
-  const oidc = state.authMode === "oidc";
+  const oidc = ["oidc", "both"].includes(state.authMode);
+  const password = ["password", "both"].includes(state.authMode);
   $("#app").hidden = true;
   $("#login-view").hidden = false;
-  $("#password-login-fields").hidden = oidc;
+  $("#password-login-fields").hidden = !password;
+  $("#login-divider").hidden = state.authMode !== "both";
   $("#oidc-login").hidden = !oidc;
   $("#oidc-login").href = state.loginUrl;
-  $("#login-password").required = !oidc;
+  $("#login-password").required = password;
   $("#login-password").value = "";
-  if (!oidc) setTimeout(() => $("#login-password").focus(), 0);
+  if (password) setTimeout(() => $("#login-password").focus(), 0);
   icons();
 }
 

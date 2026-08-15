@@ -89,7 +89,7 @@ sudo systemctl disable --now monkeycode-daily.timer 2>/dev/null || true
 Android 打开方式：webview
 ```
 
-`client_secret` 只写入 VPS 环境文件，不得提交到 Git。配置 MY OIDC 后，原管理密码登录自动停用；只有未设置 `MY_CLIENT_ID` 和 `MY_CLIENT_SECRET` 时才使用 `MONKEYCODE_PANEL_PASSWORD` 作为本地兼容登录。
+`client_secret` 只写入 VPS 环境文件，不得提交到 Git。配置 MY OIDC 后，统一认证和原管理密码登录会同时保留；OIDC 配置不完整时自动回退到 `MONKEYCODE_PANEL_PASSWORD`，不会阻止面板启动。
 
 默认只监听 VPS 的 `127.0.0.1`。仅使用手工 Cookie 时可以通过 SSH 隧道访问：
 

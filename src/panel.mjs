@@ -16,31 +16,38 @@ import { DataStore } from "./storage.mjs";
 
 function panelConfig(env = process.env) {
   const password = env.MONKEYCODE_PANEL_PASSWORD;
-  const oidcRequested = Boolean(env.MY_CLIENT_ID?.trim() || env.MY_CLIENT_SECRET?.trim());
-  if (!oidcRequested && (!password || password.length < 12)) {
-    throw new ConfigError("MONKEYCODE_PANEL_PASSWORD must contain at least 12 characters");
-  }
+  const passwordEnabled = Boolean(password && password.length >= 12);
+  const clientId = env.MY_CLIENT_ID?.trim();
+  const clientSecret = env.MY_CLIENT_SECRET?.trim();
+  const redirectUri = env.MY_REDIRECT_URI?.trim();
+  const sessionSecret = env.SESSION_SECRET?.trim();
+  const oidcRequested = Boolean(clientId || clientSecret);
   let oidc = null;
   if (oidcRequested) {
-    const clientId = env.MY_CLIENT_ID?.trim();
-    const clientSecret = env.MY_CLIENT_SECRET?.trim();
-    const redirectUri = env.MY_REDIRECT_URI?.trim();
-    const sessionSecret = env.SESSION_SECRET?.trim();
     const issuer = (env.MY_ISSUER?.trim() || "https://pxyb.cn").replace(/\/$/, "");
     const requiredRole = env.MY_REQUIRED_ROLE?.trim() || "super_admin";
-    if (!clientId || !clientSecret || !redirectUri || !sessionSecret) {
-      throw new ConfigError("MY_CLIENT_ID, MY_CLIENT_SECRET, MY_REDIRECT_URI and SESSION_SECRET are required for MY OIDC login");
+    const missing = [
+      !clientId && "MY_CLIENT_ID",
+      !clientSecret && "MY_CLIENT_SECRET",
+      !redirectUri && "MY_REDIRECT_URI",
+      (!sessionSecret || sessionSecret.length < 32) && "SESSION_SECRET",
+    ].filter(Boolean);
+    if (missing.length) {
+      console.warn(`MY OIDC login is disabled because configuration is incomplete: ${missing.join(", ")}`);
+    } else {
+      if (!new Set(["viewer", "operator", "super_admin"]).has(requiredRole)) {
+        throw new ConfigError("MY_REQUIRED_ROLE must be viewer, operator or super_admin");
+      }
+      try {
+        if (new URL(issuer).protocol !== "https:" || new URL(redirectUri).protocol !== "https:") throw new Error();
+      } catch {
+        throw new ConfigError("MY_ISSUER and MY_REDIRECT_URI must be valid HTTPS URLs");
+      }
+      oidc = { issuer, clientId, clientSecret, redirectUri, sessionSecret, requiredRole };
     }
-    if (sessionSecret.length < 32) throw new ConfigError("SESSION_SECRET must contain at least 32 characters");
-    if (!new Set(["viewer", "operator", "super_admin"]).has(requiredRole)) {
-      throw new ConfigError("MY_REQUIRED_ROLE must be viewer, operator or super_admin");
-    }
-    try {
-      if (new URL(issuer).protocol !== "https:" || new URL(redirectUri).protocol !== "https:") throw new Error();
-    } catch {
-      throw new ConfigError("MY_ISSUER and MY_REDIRECT_URI must be valid HTTPS URLs");
-    }
-    oidc = { issuer, clientId, clientSecret, redirectUri, sessionSecret, requiredRole };
+  }
+  if (!passwordEnabled && !oidc) {
+    throw new ConfigError("Configure MONKEYCODE_PANEL_PASSWORD or complete the MY OIDC settings");
   }
   const port = Number(env.MONKEYCODE_PANEL_PORT || 4180);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ConfigError("MONKEYCODE_PANEL_PORT is invalid");

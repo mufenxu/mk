@@ -85,6 +85,7 @@ export class PanelServer {
     this.runner = options.runner;
     this.notifications = options.notifications;
     this.password = options.password;
+    this.passwordEnabled = Boolean(this.password && this.password.length >= 12);
     this.oidc = options.oidc ?? null;
     this.host = options.host;
     this.port = options.port;
@@ -280,13 +281,13 @@ export class PanelServer {
         json(response, 200, session
           ? { authenticated: true, csrf: session.csrf }
           : this.oidc
-            ? { authenticated: false, mode: "oidc", loginUrl: "/auth/my/start" }
+            ? { authenticated: false, mode: this.passwordEnabled ? "both" : "oidc", loginUrl: "/auth/my/start" }
             : { authenticated: false });
         return;
       }
       if (url.pathname === "/api/auth/login" && request.method === "POST") {
-        if (this.oidc) {
-          json(response, 409, { error: "oidc-login-required" });
+        if (!this.passwordEnabled) {
+          json(response, 404, { error: "password-login-disabled" });
           return;
         }
         const address = request.socket.remoteAddress ?? "unknown";
